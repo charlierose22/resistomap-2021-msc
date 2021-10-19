@@ -2,28 +2,37 @@ setwd("~/Documents/R_WorkingProjects/Resistomap_21")
 
 library(plyr)
 library(tidyverse)
+library(readr)
 
 # import raw dataset
-rawdata <- read_csv("Raw CSV Files/rawdata.csv")
+rawdata <- 
+  read_csv("Raw CSV Files/rawdata.csv")
 
 # remove unsatisfactory flags
-flagsremoved <- rawdata[!grepl('CurveFitFail|MultipleMeltPeak|NoAmplification', rawdata$Flags),]
+flagsremoved <- 
+  rawdata[!grepl(
+    'CurveFitFail|MultipleMeltPeak|NoAmplification',
+    rawdata$Flags),]
 
 # check Ct column has no NAs
-basedata <- subset(flagsremoved, Ct != "NA")
+basedata <- 
+  subset(flagsremoved, Ct != "NA")
 
 # create replicate and ID columns
 basedata$Replicate = NA
 basedata$ID = NA
 
 # add replicate IDs
-basedata <- mutate(basedata, Replicate = case_when(
+basedata <- 
+  mutate(basedata, 
+                   Replicate = case_when(
   str_detect(Sample, "rep1") ~ "Rep1",
   str_detect(Sample, "rep2") ~ "Rep2",
   str_detect(Sample, "rep3") ~ "Rep3" ))
 
 # add sample IDs (swapped ASP Distribution to be Sample 1 as it's the earliest stage)
-basedata <- mutate(basedata, ID = case_when(
+basedata <- 
+  mutate(basedata, ID = case_when(
   str_detect(Sample, "1A") ~ "B_FeedPump",
   str_detect(Sample, "2A") ~ "C_Digester2",
   str_detect(Sample, "3A") ~ "D_Digester4" ,
@@ -34,12 +43,16 @@ basedata <- mutate(basedata, ID = case_when(
   str_detect(Sample, "8A") ~ "H_FSTDist"))
 
 # remove only one replicate
-solosremoved <- ddply(basedata, c("Assay", "ID"), function(d) {if (nrow(d) > 1) d else NULL})
+solosremoved <- 
+  ddply(basedata, c("Assay", "ID"), 
+        function(d) {if (nrow(d) > 1) d else NULL})
 
 # calculate means
-means <- solosremoved %>% 
+means <- 
+  solosremoved %>% 
   group_by(Assay, ID) %>% 
-  summarise_at(vars(Ct, Tm, Efficiency), list(mean = mean))
+  summarise_at(vars(Ct, Tm, Efficiency), 
+               list(mean = mean))
 
 # pull "Assay" column out as a list.
 Assays = dplyr::pull(means, Assay)
@@ -49,45 +62,84 @@ Ct_only <- means
 Ct_only$Tm_mean = NULL
 Ct_only$Efficiency_mean = NULL
 
+# remove assays which don't have a value for ASP
+Ct_onlywide <- 
+  Ct_only %>%
+  pivot_wider(names_from = ID, 
+              values_from = Ct_mean)
+Ct_only_ASP = subset(Ct_onlywide, Ct_onlywide$A_ASPDist != "NA")
+ASP_only = Ct_only_ASP %>%
+  pivot_longer(
+    cols = A_ASPDist:H_FSTDist,
+    names_to = "ID",
+    values_to = "Ct_mean")
+
 # create a wide table and transpose
-wide_meanCt <- Ct_only %>% pivot_wider(names_from = ID, values_from = Ct_mean)
+wide_meanCt <- 
+  ASP_only %>% 
+  pivot_wider(names_from = ID, 
+              values_from = Ct_mean)
 transposed_widemeanCt <- t(wide_meanCt[2:9])
 transposed_widemeanCt[is.na(transposed_widemeanCt)] <- 0
 # keeps numeric but we've lost assay codes
 
 # make sure the top row is the Assay codes
 assay_names <- t(wide_meanCt[1])
-colnames(transposed_widemeanCt) <- as.character(assay_names[1,])
+colnames(transposed_widemeanCt) <- 
+  as.character(assay_names[1,])
 
-#DF_widemeanCt <- as.data.frame(transposed_widemeanCt)
-#DF_widemeanCt_Assay <- rownames_to_column(DF_widemeanCt, var = "ID") %>%  head()
-# this deletes bottom row...
+# change 0 to NA
+transposed_widemeanCt[transposed_widemeanCt == 0] <- NA
 
-# Calculate DCt and DDCt values.
-DeltaCt <- transposed_widemeanCt[ , 2:187] - transposed_widemeanCt[ , "AY1"]
-# DeltaCt[DeltaCt < 0] <- 0
-DeltaDeltaCt <- DeltaCt[2:8,] - DeltaCt["A_ASPDist",]
-# DeltaDeltaCt[DeltaDeltaCt == 0] <- NA
-# commented out those lines because I can't work out why they're there...
-DDCtPower <- 2^-(DeltaDeltaCt[1:7,])
+# Calculate ∆Ct and ∆∆Ct values.
+DeltaCt <- transposed_widemeanCt[ , 2:137] - transposed_widemeanCt[ , "AY1"]
 
-# Pivot DDCt table longer, so Assays are a column.
-DF_DDCTPower <- as.data.frame(DDCtPower)
-rownames(DF_DDCTPower)
+# problem calculating correct ∆∆Ct values as not all genes have a ASP value. 
+DF_DeltaCt <- 
+  as.data.frame(DeltaCt)
 
-DF_Assay_DDCtPower <- rownames_to_column(DF_DDCTPower, var = "ID") %>%  head()
-# rownames is giving row names as separate to the rest so is not including them in the column and effectively deleting it. 
+DeltaDeltaCt <- DF_DeltaCt - as.list(DF_DeltaCt[1, ])
 
-"2DDCt_Long" <- DF_DDCt %>% 
-  pivot_longer(everything(), names_to = "Assay", values_to = "x") %>% separate(x, into = c("a","b","c","d","e","f","g"), sep = "AY", convert = TRUE)
+DeltaDeltaCt_NoASP <- DeltaDeltaCt[-1, ]
 
+DDCtPower <- 2^-(DeltaDeltaCt_NoASP)
+
+
+# add ID variable back to row names.
+ID_DDCtPower <- 
+  rownames_to_column(DDCtPower, var = "ID")
+Assay_DDCtPower <- 
+  column_to_rownames(ID_DDCtPower, "ID")
+
+# transpose table, to add assay annotations.
+DDCtPower_Long <- 
+  as.data.frame(t(Assay_DDCtPower))
+  
 # import assay information
-library(readr)
-assayinformation <- read_csv("Raw CSV Files/assayinformation.csv")
+assayinformation <- 
+  read_csv("Raw CSV Files/assayinformation.csv")
 
 # remove columns not needed
 assayinformation$`Forward Primer` = NULL
 assayinformation$`Reverse Primer` = NULL
 
 # change column names for easier code
-colnames(assayinformation) = c("Assay", "Gene", "Target_Antibiotic")
+colnames(assayinformation) = 
+  c("Assay", "Gene", "Target_Antibiotic")
+
+# join assay information with DDCt values.
+Assays_DDCtPower_Long <- 
+  rownames_to_column(DDCtPower_Long, var = "Assay")
+AnnotatedDDCt <- 
+  full_join(Assays_DDCtPower_Long, assayinformation, 
+            by = c("Assay" = "Assay"))
+Tidy_AnnotatedDDCt <- 
+  AnnotatedDDCt %>% drop_na()
+
+# pivot table longer to create a row of sample IDs
+TidyData_All <- 
+  Tidy_AnnotatedDDCt %>% 
+  pivot_longer(
+    cols = B_FeedPump:H_FSTDist,
+    names_to = "Location",
+    values_to = "Fold_Change")
