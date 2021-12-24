@@ -1,38 +1,41 @@
-#----------------SETUP-------------------
-
+#-------------SETUP-------------------
+# Choose working directory.
 setwd("~/GitHub/DNA-Analysis-2021")
+
+# Load (and possibly install) packages required.
 library(plyr)
 library(tidyverse)
 library(readr)
-library(ggforce)
-library(colorBlindness)
+library(broom)
+library(modelr)
+library(socviz)
 
-# import raw dataset
+# Import raw dataset.
+# I converted the Excel page needed into csv format first.
 Raw_Data <- read_csv("Data-Raw/rawdata.csv")
 
-# remove unsatisfactory flags
-Flags_Removed <- Raw_Data[!grepl(
-  'CurveFitFail|MultipleMeltPeak|NoAmplification', Raw_Data$Flags)]
-  
-# ---------------------INDIVIDUALS---------------------------
+# Remove unsatisfactory flags.
+Flags_Removed <- Raw_Data[!grepl('CurveFitFail|MultipleMeltPeak|NoAmplification',
+                                 Raw_Data$Flags),]
+# Remove flags column, as it's no longer needed.
+Flags_Removed$Flags = NULL
 
-# rename for stats without means.
-Individual <- Flags_Removed
-Indv_Solo_Removed$Flags = NULL
+# ------------WRANGLE---------------------------
+# Add individual sample locations for removing "solo" results.
+# "Solo" results are when out of the three repeats, there was only amplification in one sample.
+Flags_Removed$ID = NA
+Flags_Removed$Replicate = NA
 
-# Add individual sample locations for removing solo results
-Individual$ID = NA
-Individual$Replicate = NA
-
-# add replicate IDs
-Individual <- mutate(Individual,
+# Fill in replicate IDs.
+Flags_Removed <- mutate(Flags_Removed,
                      Replicate = case_when(
                        str_detect(Sample, "rep1") ~ "1",
                        str_detect(Sample, "rep2") ~ "2",
                        str_detect(Sample, "rep3") ~ "3" ))
 
-# add sample IDs (swapped ASP Distribution to be Sample 1 as it's the earliest stage)
-Individual <- mutate(Individual, ID = case_when(
+# Fill in sample IDs.
+# I swapped ASP Distribution to be Sample 1 as it's the earliest stage.
+Flags_Removed <- mutate(Flags_Removed, ID = case_when(
   str_detect(Sample, "1A") ~ "B_FeedPump",
   str_detect(Sample, "2A") ~ "C_Digester2",
   str_detect(Sample, "3A") ~ "D_Digester4" ,
@@ -42,218 +45,360 @@ Individual <- mutate(Individual, ID = case_when(
   str_detect(Sample, "7A") ~ "A_ASPDist",
   str_detect(Sample, "8A") ~ "H_FSTDist"))
 
-# remove entries with data for only one replicate
-Indv_Solo_Removed <- ddply(Individual, c("Assay", "ID"),
+# Remove "solo" results.
+Solo_Removed <- ddply(Flags_Removed, c("Assay", "ID"),
                            function(d) {if (nrow(d) > 1) d else NULL})
 
-# remove entries with no data for ASP
-Indv_ASP_Only <- Indv_Solo_Removed %>%
-  group_by(Assay) %>%
-  grep("ASPDist", Indv_Solo_Removed$ID)
+# Remove Tm and Efficiency columns as we're focusing on cycle threshold.
+Solo_Removed$Tm = NULL
+Solo_Removed$Efficiency = NULL
 
-# remove Tm and Efficiency columns
-Indv_Solo_Removed$Tm = NULL
-Indv_Solo_Removed$Efficiency = NULL
+# We now have to remove entries with no amplification at the ASP location.
+# ASP is the first location during the treatment process we have data for.
+# Make a list of unique genes that have data for the ASP location, then filter by that. list.
+List_AssayID <- unique(Solo_Removed[grepl("ASPDist",Solo_Removed$ID),]$Assay)
+Only_ASP <- dplyr::filter(Solo_Removed, Assay %in% List_AssayID)
 
-# change sample column to have locations in and not begin with a number.
-Indv_Solo_Removed$SampleID = NA
-Individual_Mutated <- mutate(Indv_Solo_Removed, SampleID = case_when(
-  str_detect(Sample, "1A-rep1") ~ "B1_FeedPump",
-  str_detect(Sample, "1A-rep2") ~ "B2_FeedPump",
-  str_detect(Sample, "1A-rep3") ~ "B3_FeedPump",
-  str_detect(Sample, "2A-rep1") ~ "C1_Digester2",
-  str_detect(Sample, "2A-rep2") ~ "C2_Digester2",
-  str_detect(Sample, "2A-rep3") ~ "C3_Digester2",
-  str_detect(Sample, "3A-rep1") ~ "D1_Digester4" ,
-  str_detect(Sample, "3A-rep2") ~ "D2_Digester4" ,
-  str_detect(Sample, "3A-rep3") ~ "D3_Digester4" ,
-  str_detect(Sample, "4A-rep1") ~ "E1_CentrifugeIn",
-  str_detect(Sample, "4A-rep2") ~ "E2_CentrifugeIn",
-  str_detect(Sample, "4A-rep3") ~ "E3_CentrifugeIn",
-  str_detect(Sample, "5A-rep1") ~ "F1_NewDrySolid",
-  str_detect(Sample, "5A-rep2") ~ "F2_NewDrySolid",
-  str_detect(Sample, "5A-rep3") ~ "F3_NewDrySolid",
-  str_detect(Sample, "6A-rep1") ~ "G1_TWDrySolid",
-  str_detect(Sample, "6A-rep2") ~ "G2_TWDrySolid",
-  str_detect(Sample, "6A-rep3") ~ "G3_TWDrySolid",
-  str_detect(Sample, "7A-rep1") ~ "A1_ASPDist",
-  str_detect(Sample, "7A-rep2") ~ "A2_ASPDist",
-  str_detect(Sample, "7A-rep3") ~ "A3_ASPDist",
-  str_detect(Sample, "8A-rep1") ~ "H1_FSTDist",
-  str_detect(Sample, "8A-rep2") ~ "H2_FSTDist",
-  str_detect(Sample, "8A-rep3") ~ "H3_FSTDist"))
+# Mutate the sample column to not begin with a number, for easier coding and recognition.
+Only_ASP$SampleID = NA
+Mutated_SampleID <- mutate(Only_ASP, SampleID = case_when(
+  str_detect(Sample, "1A-rep1") ~ "B_rep1_FeedPump",
+  str_detect(Sample, "1A-rep2") ~ "B_rep2_FeedPump",
+  str_detect(Sample, "1A-rep3") ~ "B_rep3_FeedPump",
+  str_detect(Sample, "2A-rep1") ~ "C_rep1_Digester2",
+  str_detect(Sample, "2A-rep2") ~ "C_rep2_Digester2",
+  str_detect(Sample, "2A-rep3") ~ "C_rep3_Digester2",
+  str_detect(Sample, "3A-rep1") ~ "D_rep1_Digester4" ,
+  str_detect(Sample, "3A-rep2") ~ "D_rep2_Digester4" ,
+  str_detect(Sample, "3A-rep3") ~ "D_rep3_Digester4" ,
+  str_detect(Sample, "4A-rep1") ~ "E_rep1_CentrifugeIn",
+  str_detect(Sample, "4A-rep2") ~ "E_rep2_CentrifugeIn",
+  str_detect(Sample, "4A-rep3") ~ "E_rep3_CentrifugeIn",
+  str_detect(Sample, "5A-rep1") ~ "F_rep1_NewDrySolid",
+  str_detect(Sample, "5A-rep2") ~ "F_rep2_NewDrySolid",
+  str_detect(Sample, "5A-rep3") ~ "F_rep3_NewDrySolid",
+  str_detect(Sample, "6A-rep1") ~ "G_rep1_TWDrySolid",
+  str_detect(Sample, "6A-rep2") ~ "G_rep2_TWDrySolid",
+  str_detect(Sample, "6A-rep3") ~ "G_rep3_TWDrySolid",
+  str_detect(Sample, "7A-rep1") ~ "A_rep1_ASPDist",
+  str_detect(Sample, "7A-rep2") ~ "A_rep2_ASPDist",
+  str_detect(Sample, "7A-rep3") ~ "A_rep3_ASPDist",
+  str_detect(Sample, "8A-rep1") ~ "H_rep1_FSTDist",
+  str_detect(Sample, "8A-rep2") ~ "H_rep2_FSTDist",
+  str_detect(Sample, "8A-rep3") ~ "H_rep3_FSTDist"))
 
-Individual_Mutated$Sample = NULL
+# Remove the original Sample ID column, as it has been replaced.
+Mutated_SampleID$Sample = NULL
 
-# Pivot table
-Indv_Wide <- Individual_Mutated %>%
+# Pivot the table wider.
+Mutated_Wide <- Mutated_SampleID %>%
   pivot_wider(names_from = Assay, values_from = Ct)
 
-# Create sample ID table
-SampleID <- Indv_Wide$SampleID
+# Remove extra unneeded columns
+Mutated_Wide$ID = NULL
+Mutated_Wide$Replicate = NULL
 
-# Calculate DCt
-#Indv_DCt <- Indv_Wide %>%
-  #mutate(across(c(AY10:AY96),
-             #   ~.x - "AY1",
-             #   .names = "{.col}-AY1"),)
-# <- Indv_DCt[,grep("-AY1|Sample", colnames(Indv_DCt))]
+# Create sample ID list.
+SampleID <- Mutated_Wide$SampleID
 
-# calculate DDCt
+# Pivot the table back to longer.
+Mutated_Long <- Mutated_Wide %>%
+  pivot_longer(
+    cols = AY1:AY96, names_to = "Assay", values_to = "Ct")
 
-# pivot back to long
-Indv_Long <- Indv_Wide %>% pivot_longer(
-  cols = AY1:AY96, names_to = "Assay", values_to = "DeltaCt")
+# Pivot the table again, so Sample ID is across the top, rather than Assay.
+Mutated_Wide_2 <- Mutated_Long %>%
+  pivot_wider(
+    names_from = SampleID, values_from = Ct)
 
-# import assay information
-Assay_Information <- read_csv("Data-Raw/assayinformation.csv")
+# Transpose the table.
+Transposed_Ct <- t(Mutated_Wide_2[2:25])
 
-# remove columns not needed
-Assay_Information$`Forward Primer` = NULL
-Assay_Information$`Reverse Primer` = NULL
+# Make sure the top row is the Assay codes, by first extracting as a list.
+Assay_Names <- t(Mutated_Wide_2[1])
+colnames(Transposed_Ct) <- as.character(Assay_Names[1,])
 
-# change column names for easier code
-colnames(Assay_Information) = c("Assay", "Gene", "Target_Antibiotic")
-
-# join assay information
-Annotated_Indv <- full_join(Indv_Long, Assay_Information,
-                                    by = c("Assay" = "Assay"))
-Tidy_Annotated_Indv <- Annotated_Indv %>% drop_na()
-
-
-
-# ---------------------MEANS---------------------------
-
-# check Ct column has no NAs
-Base_Data <- subset(Flags_Removed, Ct != "NA")
-Base_Data$Flags = NULL
-
-# create replicate and ID columns
-Base_Data$Replicate = NA
-Base_Data$ID = NA
-
-# add replicate IDs
-Base_Data <- mutate(Base_Data,
-                    Replicate = case_when(
-                      str_detect(Sample, "rep1") ~ "A",
-                      str_detect(Sample, "rep2") ~ "B",
-                      str_detect(Sample, "rep3") ~ "C" ))
-
-# add sample IDs (swapped ASP Distribution to be Sample 1 as it's the earliest stage)
-Base_Data <- mutate(Base_Data, ID = case_when(
-  str_detect(Sample, "1A") ~ "B_FeedPump",
-  str_detect(Sample, "2A") ~ "C_Digester2",
-  str_detect(Sample, "3A") ~ "D_Digester4" ,
-  str_detect(Sample, "4A") ~ "E_CentrifugeIn",
-  str_detect(Sample, "5A") ~ "F_NewDrySolid",
-  str_detect(Sample, "6A") ~ "G_TWDrySolid",
-  str_detect(Sample, "7A") ~ "A_ASPDist",
-  str_detect(Sample, "8A") ~ "H_FSTDist"))
-
-# remove entries with data for only one replicate
-Solo_Removed <- ddply(Base_Data, c("Assay", "ID"),
-                      function(d) {if (nrow(d) > 1) d else NULL})
-
-# calculate means
-Mean <- Solo_Removed %>%
-  group_by(Assay, ID) %>%
-  summarise_at(vars(Ct, Tm, Efficiency),
-               list(Mean = mean))
-
-# remove Tm and Efficiency columns
-Ct_Only <- Mean
-Ct_Only$Tm_Mean = NULL
-Ct_Only$Efficiency_Mean = NULL
-
-# remove assays which don't have a value for ASP
-Ct_Only_Wide <- Ct_Only %>%
-  pivot_wider(names_from = ID, values_from = Ct_Mean)
-
-Ct_Only_ASP = subset(Ct_Only_Wide, Ct_Only_Wide$A_ASPDist != "NA")
-
-ASP_Only = Ct_Only_ASP %>% pivot_longer(
-  cols = A_ASPDist:H_FSTDist, names_to = "ID", values_to = "Ct_mean")
-
-# create a wide table and transpose
-Wide_Mean_Ct <- ASP_Only %>%
-  pivot_wider(names_from = ID, values_from = Ct_mean)
-
-Transposed_Wide_Mean_Ct <- t(Wide_Mean_Ct[2:9])
-
-Transposed_Wide_Mean_Ct[is.na(Transposed_Wide_Mean_Ct)] <- 0
-# keeps numeric but we've lost assay codes
-
-# make sure the top row is the Assay codes
-Assay_Names <- t(Wide_Mean_Ct[1])
-colnames(Transposed_Wide_Mean_Ct) <- as.character(Assay_Names[1,])
-
-# change 0 to NA
-Transposed_Wide_Mean_Ct[Transposed_Wide_Mean_Ct == 0] <- NA
-
-# Calculate DCt and DDCt values.
-Delta_Ct <- Transposed_Wide_Mean_Ct[ , 2:137] - Transposed_Wide_Mean_Ct[ , "AY1"]
+# Calculate Delta Ct and make sure the output is as a data frame.
+as.data.frame(Transposed_Ct)
+Delta_Ct <- Transposed_Ct[ , 2:137] - Transposed_Ct[ , "AY1"]
 DF_Delta_Ct <- as.data.frame(Delta_Ct)
-Delta_Delta_Ct <- DF_Delta_Ct - as.list(DF_Delta_Ct[1, ])
-Delta_Delta_Ct_No_ASP <- Delta_Delta_Ct[-1, ]
+
+# Start with ASP values on their own.
+Delta_Ct_ASP <- head(DF_Delta_Ct, 3)
+
+# Turn the rownames into the first column to preserve them.
+Delta_Ct_ASP_Rownames <- rownames_to_column(Delta_Ct_ASP, "SampleID")
+
+# Calculate the sum of each column.
+Delta_Ct_ASP_Sum <- as.data.frame(colSums(Delta_Ct_ASP_Rownames[ , -1], na.rm = TRUE))
+
+# Rename the resulting sum column.
+Delta_Ct_ASP_Sum_Rownames <- rownames_to_column(Delta_Ct_ASP_Sum, "Assay")
+names(Delta_Ct_ASP_Sum_Rownames)[2] <- "Sum_Delta_Ct"
+
+# Pivot wider ready for mean calculation.
+Delta_Ct_ASP_Sum_Wide <- pivot_wider(Delta_Ct_ASP_Sum_Rownames,
+                                 names_from = "Assay",
+                                 values_from = "Sum_Delta_Ct")
+
+# Pivot longer for counting data entries.
+Delta_Ct_ASP_Long <- pivot_longer(Delta_Ct_ASP_Sum_Wide,
+                              cols = AY10:AY96,
+                              names_to = "Assay",
+                              values_to = "Delta_Ct",
+                              values_drop_na = TRUE)
+
+# Count the frequency for each gene.
+Delta_Ct_ASP_Count <- as.data.frame(table(Delta_Ct_ASP_Long$Assay))
+
+# Pivot wider again.
+Delta_Ct_ASP_Count_Wide <- as.data.frame(pivot_wider(Delta_Ct_ASP_Count,
+                                                 names_from = "Var1",
+                                                 values_from = "Freq"))
+
+# Calculate ASP means for Delta Delta Ct calculation.
+Delta_Ct_ASP_Mean <- as.data.frame(Delta_Ct_ASP_Sum_Wide * Delta_Ct_ASP_Count_Wide)
+
+# Calculate Delta Delta Ct.
+Delta_Delta_Ct <- DF_Delta_Ct - as.list(Delta_Ct_ASP_Mean)
+
+# Remove ASP values from main table.
+Delta_Delta_Ct_No_ASP <- tail(Delta_Delta_Ct, -3)
+
+# Calculate 2^DDC, or is it better to log2 later?
 DDCt_Power <- 2^-(Delta_Delta_Ct_No_ASP)
 
-# add ID variable back to row names.
-ID_DDCt_Power <- rownames_to_column(DDCt_Power, var = "ID")
-Assay_DDCt_Power <- column_to_rownames(ID_DDCt_Power, "ID")
+# Convert row names to a column of their own to protect them.
+DDCt_Power_Loc <- rownames_to_column(DDCt_Power, "SampleID")
 
-# transpose table, to add assay annotations.
-DDCt_Power_Long <- as.data.frame(t(Assay_DDCt_Power))
+# ------------ANALYSIS----------------
 
-# import assay information
+# Add replicate and ID columns.
+DDCt_P <- DDCt_Power_Loc
+DDCt_P$Replicate = NA
+DDCt_P$Treatment_Stage = NA
+
+# Rearrange the columns to make it easier.
+Rearranged_DDCt_P <- subset(DDCt_P, select = c(
+  SampleID, Treatment_Stage, Replicate, AY10:AY96))
+
+Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P,
+                            Replicate = case_when(
+                              str_detect(SampleID, "rep1") ~ "rep1",
+                              str_detect(SampleID, "rep2") ~ "rep2",
+                              str_detect(SampleID, "rep3") ~ "rep3" ))
+
+# Add sample IDs in their column.
+Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P, Treatment_Stage = case_when(
+  str_detect(SampleID, "Feed") ~ "B_FeedPump",
+  str_detect(SampleID, "Digester2") ~ "C_Digester2",
+  str_detect(SampleID, "Digester4") ~ "D_Digester4" ,
+  str_detect(SampleID, "Centrifuge") ~ "E_CentrifugeIn",
+  str_detect(SampleID, "NewDry") ~ "F_NewDrySolid",
+  str_detect(SampleID, "TWDry") ~ "G_TWDrySolid",
+  str_detect(SampleID, "FST") ~ "H_FSTDist"))
+
+# Remove the joined sample ID column, as it has been split.
+Rearranged_DDCt_P$SampleID = NULL
+
+# Pivot longer.
+DDCt_P_Long <- pivot_longer(Rearranged_DDCt_P,
+                            cols = AY10:AY96,
+                            names_to = "Assay",
+                            values_to = "DDCtTwoP",
+                            values_drop_na = TRUE)
+
+DDCt_ASP_Power <- 2^-(Delta_Ct_ASP_Mean)
+DDCt_ASP_Mean_Long <- pivot_longer(DDCt_ASP_Power,
+                                   cols = AY10:AY96,
+                                   names_to = "Assay",
+                                   values_to = "ASP_DCt")
+
+# Join the ASP and long table together.
+DDCtP_With_ASP <- full_join(DDCt_P_Long, DDCt_ASP_Mean_Long,
+                            by = c("Assay" = "Assay"))
+
+# ------------ANNOTATONS-------
+
+# Import assay information.
 Assay_Information <- read_csv("Data-Raw/assayinformation.csv")
 
-# remove columns not needed
+# Remove the columns not needed.
 Assay_Information$`Forward Primer` = NULL
 Assay_Information$`Reverse Primer` = NULL
 
-# change column names for easier code
+# Change column names for easier code.
 colnames(Assay_Information) = c("Assay", "Gene", "Target_Antibiotic")
 
-# join assay information with DDCt values.
-Assays_DDCt_Power_Long <- rownames_to_column(DDCt_Power_Long, var = "Assay")
-Annotated_DDCt <- full_join(Assays_DDCt_Power_Long, Assay_Information,
-                           by = c("Assay" = "Assay"))
-Tidy_Annotated_DDCt <- Annotated_DDCt %>% drop_na()
+# Remove Taxonomic genes for now, focus on resistance genes.
+Assay_Information <- Assay_Information[!grepl('Taxanomic',
+                                              Assay_Information$Target_Antibiotic),]
 
-# pivot table longer to create a row of sample IDs
-Tidy_Data_All <- Tidy_Annotated_DDCt %>%
-  pivot_longer(cols = B_FeedPump:H_FSTDist,
-               names_to = "Treatment_Stage",
-               values_to = "Fold_Change")
-group_by(Tidy_Data_All, Gene, Target_Antibiotic)
+# Join the main table with the assay information.
+Annotated_DDCtP <- full_join(DDCtP_With_ASP, Assay_Information,
+                             by = c("Assay" = "Assay"))
 
-# counts of genes? All 7?
-Genes_Found <- as.matrix(Tidy_Data_All$Gene)
-Genes_Found <- t(Genes_Found)
-Genes_Found <- Genes_Found[!duplicated(Genes_Found),]
-Genes_Found <- as.data.frame(Genes_Found)
-aggregate(Genes_Found, by = Genes_Found, length) [1:ncol(Genes_Found) + 1]
+# Remove any NAs
+Annotated_DDCtP <- Annotated_DDCtP %>% drop_na()
 
-# ---------------------GRAPHS-----------------------------
+# Rearrange columns.
+Annotated_DDCtP <- subset(Annotated_DDCtP, select = c(
+  Assay, Treatment_Stage, Gene, DDCtTwoP, ASP_DCt, Target_Antibiotic, Replicate))
 
-# produce initial graph based on tidy data
-pdf("Figures/All_Fold_Expressions.pdf", width = 10, height = 50)
-ggplot(data = Tidy_Data_All, mapping = aes(x = Gene, y = Fold_Change)) +
-  geom_point(aes(color = Treatment_Stage)) +
+# Calculate the standard errors.
+DDCtP_Summary <- Annotated_DDCtP %>%
+  group_by(Gene, Treatment_Stage) %>%
+  summarise(mean = mean(DDCtTwoP),
+            std = sd(DDCtTwoP),
+            n = length(DDCtTwoP),
+            se = std/sqrt(n))
+
+Summary_DDCtP <- Annotated_DDCtP
+Summary_DDCtP$Assay = NULL
+
+# Potentially create a wide format table with the summary information.
+DDCtP_Wide <- pivot_wider(Annotated_DDCtP,
+                          names_from = Gene,
+                          values_from = DDCtTwoP)
+
+# ------------MODEL-------
+# Produce initial plot.
+ggplot(data = Annotated_DDCtP, mapping =
+         aes(Treatment_Stage, DDCtTwoP)) +
+  geom_violin() +
   facet_wrap_paginate(facets = vars(Target_Antibiotic),
-             ncol = 1,
-             scales = "free_x") +
-  labs(x = "Gene",
-       y = "Relative Fold Expression",
-       color = "Treatment Stage") +
-  theme_classic()
-dev.off()
+                      ncol = 1,
+                      scales = "free_x")
 
-#split based on target antibiotic
-Split <- split(Tidy_Data_All, Tidy_Data_All$Target_Antibiotic)
+# Split based on Treatment Stage.
+Split <- split(Annotated_DDCtP, Annotated_DDCtP$Treatment_Stage)
+B_FeedPump <- Split$B_FeedPump
+C_Digester2 <- Split$C_Digester2
+D_Digester4 <- Split$D_Digester4
+E_CentrifugeIn <- Split$E_CentrifugeIn
+F_NewDrySolid <- Split$F_NewDrySolid
+G_TWDrySolid <- Split$G_TWDrySolid
+H_FSTDist <- Split$H_FSTDist
+
+# Rename dataset for model.
+DDCtP_LM <- DDCtP_Wide
+DDCtP_LM <- na.omit(DDCtP_LM)
+str(DDCtP_LM)
+
+# Create model.
+# How does DDCtTwoP change across each location for each gene?
+B_lm <- lm(DDCtTwoP ~ Gene, data = B_FeedPump)
+
+# Use tidy to neaten table and add confidence intervals.
+B_out_conf <- tidy(B_lm, conf.int = TRUE)
+
+# Needed to strip term names.
+# Strip out prefix in term column.
+B_out_conf$nicelabs <- prefix_strip(B_out_conf$term, "Gene")
+
+# Augment generates Cook's distance, residual values and fitted values.
+B_out_aug <- augment(B_lm)
+
+# Create new column to show location.
+B_out_aug$Treatment_Stage = "B"
+
+# Summary model values.
+glance(B_lm)
+
+# repeat for C.
+C_lm <- lm(DDCtTwoP ~ Gene, data = C_Digester2)
+C_out_conf <- tidy(C_lm, conf.int = TRUE)
+C_out_conf$nicelabs <- prefix_strip(C_out_conf$term, "Gene")
+C_out_aug <- augment(C_lm)
+C_out_aug$Treatment_Stage = "C"
+glance(C_lm)
+
+# repeat for D.
+D_lm <- lm(DDCtTwoP ~ Gene, data = D_Digester4)
+D_out_conf <- tidy(D_lm, conf.int = TRUE)
+D_out_conf$nicelabs <- prefix_strip(D_out_conf$term, "Gene")
+D_out_aug <- augment(D_lm)
+D_out_aug$Treatment_Stage = "D"
+glance(D_lm)
+
+# repeat for E.
+E_lm <- lm(DDCtTwoP ~ Gene, data = E_CentrifugeIn)
+E_out_conf <- tidy(E_lm, conf.int = TRUE)
+E_out_conf$nicelabs <- prefix_strip(E_out_conf$term, "Gene")
+E_out_aug <- augment(E_lm)
+E_out_aug$Treatment_Stage = "E"
+glance(E_lm)
+
+# repeat for F.
+F_lm <- lm(DDCtTwoP ~ Gene, data = F_NewDrySolid)
+F_out_conf <- tidy(F_lm, conf.int = TRUE)
+F_out_conf$nicelabs <- prefix_strip(F_out_conf$term, "Gene")
+F_out_aug <- augment(F_lm)
+F_out_aug$Treatment_Stage = "F"
+glance(F_lm)
+
+# repeat for G.
+G_lm <- lm(DDCtTwoP ~ Gene, data = G_TWDrySolid)
+G_out_conf <- tidy(G_lm, conf.int = TRUE)
+G_out_conf$nicelabs <- prefix_strip(G_out_conf$term, "Gene")
+G_out_aug <- augment(G_lm)
+G_out_aug$Treatment_Stage = "G"
+glance(G_lm)
+
+# repeat for H.
+H_lm <- lm(DDCtTwoP ~ Gene, data = H_FSTDist)
+H_out_conf <- tidy(H_lm, conf.int = TRUE)
+H_out_conf$nicelabs <- prefix_strip(H_out_conf$term, "Gene")
+H_out_aug <- augment(H_lm)
+H_out_aug$Treatment_Stage = "H"
+glance(H_lm)
+
+# Join all tables together.
+Full_lm_out <- rbind.data.frame(B_out_aug,
+                                C_out_aug,
+                                D_out_aug,
+                                E_out_aug,
+                                G_out_aug,
+                                H_out_aug)
+
+# Join with the assay information.
+Annotated_Full_Model <- full_join(Full_lm_out, Assay_Information,
+                             by = c("Gene" = "Gene"))
+
+Annotated_Full_Model <- Annotated_Full_Model %>% drop_na()
+Annotated_Full_Model$Assay = NULL
+
+# Revert Treatment Stages back to original names.
+Annotated_Full_Model <- mutate(Annotated_Full_Model, Treatment_Stage = case_when(
+  str_detect(Treatment_Stage, "B") ~ "B_FeedPump",
+  str_detect(Treatment_Stage, "C") ~ "C_Digester2",
+  str_detect(Treatment_Stage, "D") ~ "D_Digester4" ,
+  str_detect(Treatment_Stage, "E") ~ "E_CentrifugeIn",
+  str_detect(Treatment_Stage, "F") ~ "F_NewDrySolid",
+  str_detect(Treatment_Stage, "G") ~ "G_TWDrySolid",
+  str_detect(Treatment_Stage, "H") ~ "H_FSTDist"))
+
+# Re-do summary table.
+Annotated_Full_Summary <- Annotated_Full_Model %>%
+  group_by(Gene, Treatment_Stage) %>%
+  summarise(mean = mean(DDCtTwoP),
+            std = sd(DDCtTwoP),
+            n = length(DDCtTwoP),
+            se = std/sqrt(n))
+
+# Join summary and model table.
+All_Data <- full_join(Annotated_Full_Summary, Annotated_Full_Model,
+                                  by = c("Gene" = "Gene", "Treatment_Stage" = "Treatment_Stage"))
+
+# ------------GRAPHS------------------
+library(ggforce)
+library(colorBlindness)
+
+#split table based on target antibiotic
+Split <- split(All_Data, All_Data$Target_Antibiotic)
 Aminoglycoside <- Split$Aminoglycoside
 Beta_Lactam <- Split$`Beta Lactam`
-Integrons <- Split$Integrons
+Integron <- Split$Integrons
 MDR <- Split$MDR
 MGE <- Split$MGE
 MLSB <- Split$MLSB
@@ -261,140 +406,2581 @@ Other <- Split$Other
 Phenicol <- Split$Phenicol
 Quinolone <- Split$Quinolone
 Sulfonamide <- Split$Sulfonamide
-Taxonomic <- Split$Taxanomic
 Tetracycline <- Split$Tetracycline
 Trimethoprim <- Split$Trimethoprim
 
-# Focus on Aminoglycoside points first.
-ggplot(data = Aminoglycoside,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
-  labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Aminoglycoside_1.png", width = 12, height = 8)
+# create a table for tidy data
+write.csv(All_Data, "AllData.csv", row.names = FALSE)
 
-# Copy line graohs for each of the Targets
-ggplot(data = Beta_Lactam,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+# Attempt a loop? Gave an error code.
+gg <- ggplot(Annotated_Full_Summary,
+             aes(x = Treatment_Stage,
+                 y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = i) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Beta_Lactam_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression",
+       title = Target_Antibiotic) +
+  theme_classic(base_size = 12)
+n <- n_pages(gg)
 
-ggplot(data = Integrons,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
-  labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
+for (i in 1:n) {
+  print(gg + facet_wrap_paginate(vars(Gene), scales = "free",
+                                 ncol = 1, nrow = 1, page = i))
+  ggsave(paste0("Figures/ARG_", i, ".png", width = 6, height = 4))
+}
 dev.off()
-ggsave("Figures/Integrons_1.png", width = 12, height = 8)
 
-ggplot(data = MGE,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
-  labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/MGE_1.png", width = 12, height = 8)
+#-------------AMINOGLYCOSIDE---------
 
-ggplot(data = MLSB,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+# Focus on Aminoglycoside points first... there are 22 genes.
+#1
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+             ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/MLSB_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside1.png", width = 6, height = 4)
 
-ggplot(data = Other,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#2
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Other_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside2.png", width = 6, height = 4)
 
-ggplot(data = Phenicol,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#3
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Phenicol_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside3.png", width = 6, height = 4)
 
-ggplot(data = Quinolone,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#4
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Quinolone_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside4.png", width = 6, height = 4)
 
-ggplot(data = Sulfonamide,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#5
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Sulfonamide_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside5.png", width = 6, height = 4)
 
-ggplot(data = Taxonomic,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#6
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Taxonomic_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside6.png", width = 6, height = 4)
 
-ggplot(data = Tetracycline,
-       mapping = aes(x = Treatment_Stage, y = Fold_Change,
-                     group = Gene, color = as.factor(Gene))) +
-  geom_point(alpha = 0.5, aes(color = Gene)) +
-  geom_line(aes(color =  Gene)) +
+#7
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
   labs(x = "Treatment Stage",
-       y = "Relative Fold Expression",
-       colour = "Gene") +
-  theme_light()
-dev.off()
-ggsave("Figures/Tetracycline_1.png", width = 12, height = 8)
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside7.png", width = 6, height = 4)
+
+#8
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside8.png", width = 6, height = 4)
+
+#9
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside9.png", width = 6, height = 4)
+
+#10
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside10.png", width = 6, height = 4)
+
+#11
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside11.png", width = 6, height = 4)
+
+#12
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 12) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside12.png", width = 6, height = 4)
+
+#13
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 13) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside13.png", width = 6, height = 4)
+
+#14
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 14) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside14.png", width = 6, height = 4)
+
+#15
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 15) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside15.png", width = 6, height = 4)
+
+#16
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 16) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside16.png", width = 6, height = 4)
+
+#17
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 17) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside17.png", width = 6, height = 4)
+
+#18
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 18) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside18.png", width = 6, height = 4)
+
+#19
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 19) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside19.png", width = 6, height = 4)
+
+#20
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 20) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside20.png", width = 6, height = 4)
+
+#21
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 21) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside21.png", width = 6, height = 4)
+
+#22
+ggplot(Aminoglycoside,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 22) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Aminoglycoside22.png", width = 6, height = 4)
+
+#-------------BETA_LACTAM-----------
+# Repeat for Beta Lactam, total of 14 genes detected.
+#1
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam1.png", width = 6, height = 4)
+
+#2
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam2.png", width = 6, height = 4)
+
+#3
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam3.png", width = 6, height = 4)
+
+#4
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam4.png", width = 6, height = 4)
+
+#5
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam5.png", width = 6, height = 4)
+
+#6
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam6.png", width = 6, height = 4)
+
+#7
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam7.png", width = 6, height = 4)
+
+#8
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam8.png", width = 6, height = 4)
+
+#9
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam9.png", width = 6, height = 4)
+
+#10
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam10.png", width = 6, height = 4)
+
+#11
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam11.png", width = 6, height = 4)
+
+#12
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 12) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam12.png", width = 6, height = 4)
+
+#13
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 13) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam13.png", width = 6, height = 4)
+
+#14
+ggplot(Beta_Lactam,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 14) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Beta_Lactam14.png", width = 6, height = 4)
+
+#-------------INTEGRONS------------
+# Integrons, total of 4 genes.
+#1
+ggplot(Integron,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Integron1.png", width = 6, height = 4)
+
+#2
+ggplot(Integron,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Integron2.png", width = 6, height = 4)
+
+#3
+ggplot(Integron,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Integron3.png", width = 6, height = 4)
+
+#4
+ggplot(Integron,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Integron4.png", width = 6, height = 4)
+
+#-------------MDR------------
+# Multi-drug resistance, total of 11 genes.
+#1
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR1.png", width = 6, height = 4)
+
+#2
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR2.png", width = 6, height = 4)
+
+#3
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR3.png", width = 6, height = 4)
+
+#4
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR4.png", width = 6, height = 4)
+
+#5
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR5.png", width = 6, height = 4)
+
+#6
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR6.png", width = 6, height = 4)
+
+#7
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR7.png", width = 6, height = 4)
+
+#8
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR8.png", width = 6, height = 4)
+
+#9
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR9.png", width = 6, height = 4)
+
+#10
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR10.png", width = 6, height = 4)
+
+#11
+ggplot(MDR,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MDR11.png", width = 6, height = 4)
+
+#-------------MGE--------------
+# Mobile genetic elements, total of 24 genes.
+#1
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE1.png", width = 6, height = 4)
+
+#2
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE2.png", width = 6, height = 4)
+
+#3
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE3.png", width = 6, height = 4)
+
+#4
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE4.png", width = 6, height = 4)
+
+#5
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE5.png", width = 6, height = 4)
+
+#6
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE6.png", width = 6, height = 4)
+
+#7
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE7.png", width = 6, height = 4)
+
+#8
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE8.png", width = 6, height = 4)
+
+#9
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE9.png", width = 6, height = 4)
+
+#10
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE10.png", width = 6, height = 4)
+
+#11
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE11.png", width = 6, height = 4)
+
+#12
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 12) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE12.png", width = 6, height = 4)
+
+#13
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 13) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE13.png", width = 6, height = 4)
+
+#14
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 14) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE14.png", width = 6, height = 4)
+
+#15
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 15) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE15.png", width = 6, height = 4)
+
+#16
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 16) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE16.png", width = 6, height = 4)
+
+#17
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 17) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE17.png", width = 6, height = 4)
+
+#18
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 18) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE18.png", width = 6, height = 4)
+
+#19
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 19) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE19.png", width = 6, height = 4)
+
+#20
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 20) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE20.png", width = 6, height = 4)
+
+#21
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 21) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE21.png", width = 6, height = 4)
+
+#22
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 22) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE22.png", width = 6, height = 4)
+
+#23
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 23) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE23.png", width = 6, height = 4)
+
+#24
+ggplot(MGE,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 24) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MGE24.png", width = 6, height = 4)
+
+#-------------MLSB------------------
+# MLSB, total of 12 genes.
+#1
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB1.png", width = 6, height = 4)
+
+#2
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB2.png", width = 6, height = 4)
+
+#3
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB3.png", width = 6, height = 4)
+
+#4
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB4.png", width = 6, height = 4)
+
+#5
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB5.png", width = 6, height = 4)
+
+#6
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB6.png", width = 6, height = 4)
+
+#7
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB7.png", width = 6, height = 4)
+
+#8
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB8.png", width = 6, height = 4)
+
+#9
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB9.png", width = 6, height = 4)
+
+#10
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB10.png", width = 6, height = 4)
+
+#11
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB11.png", width = 6, height = 4)
+
+#12
+ggplot(MLSB,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 12) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/MLSB12.png", width = 6, height = 4)
+
+#-------------OTHER--------------
+# Other, total of 8 genes.
+#1
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other1.png", width = 6, height = 4)
+
+#2
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other2.png", width = 6, height = 4)
+
+#3
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other3.png", width = 6, height = 4)
+
+#4
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other4.png", width = 6, height = 4)
+
+#5
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other5.png", width = 6, height = 4)
+
+#6
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other6.png", width = 6, height = 4)
+
+#7
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other7.png", width = 6, height = 4)
+
+#8
+ggplot(Other,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Other8.png", width = 6, height = 4)
+
+#------------PHENICOL--------------
+# Phenicol, total of 6 genes.
+#1
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol1.png", width = 6, height = 4)
+
+#2
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol2.png", width = 6, height = 4)
+
+#3
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol3.png", width = 6, height = 4)
+
+#4
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol4.png", width = 6, height = 4)
+
+#5
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol5.png", width = 6, height = 4)
+
+#6
+ggplot(Phenicol,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Phenicol6.png", width = 6, height = 4)
+
+#----------------QUINOLONE------------------
+# Quinolone, total of 4 genes.
+#1
+ggplot(Quinolone,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Quinolone1.png", width = 6, height = 4)
+
+#2
+ggplot(Quinolone,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Quinolone2.png", width = 6, height = 4)
+
+#3
+ggplot(Quinolone,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Quinolone3.png", width = 6, height = 4)
+
+#4
+ggplot(Quinolone,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Quinolone4.png", width = 6, height = 4)
+
+#------------------SULFONAMIDE------------------
+# Sulfonamide, total of 3 genes.
+#1
+ggplot(Sulfonamide,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Sulfonamide1.png", width = 6, height = 4)
+
+#2
+ggplot(Sulfonamide,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Sulfonamide2.png", width = 6, height = 4)
+
+#3
+ggplot(Sulfonamide,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Sulfonamide3.png", width = 6, height = 4)
+
+#-----------------TETRACYCLINE-----------------
+# Tetracycline, total of 16 genes.
+#1
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline1.png", width = 6, height = 4)
+
+#2
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline2.png", width = 6, height = 4)
+
+#3
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline3.png", width = 6, height = 4)
+
+#4
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 4) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline4.png", width = 6, height = 4)
+
+#5
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 5) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline5.png", width = 6, height = 4)
+
+#6
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 6) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline6.png", width = 6, height = 4)
+
+#7
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 7) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline7.png", width = 6, height = 4)
+
+#8
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 8) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline8.png", width = 6, height = 4)
+
+#9
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 9) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline9.png", width = 6, height = 4)
+
+#10
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 10) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline10.png", width = 6, height = 4)
+
+#11
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 11) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline11.png", width = 6, height = 4)
+
+#12
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 12) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline12.png", width = 6, height = 4)
+
+#13
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 13) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline13.png", width = 6, height = 4)
+
+#14
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 14) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline14.png", width = 6, height = 4)
+
+#15
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 15) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline15.png", width = 6, height = 4)
+
+#16
+ggplot(Tetracycline,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 16) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Tetracycline16.png", width = 6, height = 4)
+
+#------------TRIMETHOPRIM------------
+# Trimethoprim, 2 genes to end.
+#1
+ggplot(Trimethoprim,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 1) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Trimethoprim1.png", width = 6, height = 4)
+
+#2
+ggplot(Trimethoprim,
+       aes(x = Treatment_Stage,
+           y = mean)) +
+  geom_point() +
+  facet_wrap_paginate(vars(Gene), scales = "free",
+                      ncol = 1, nrow = 1, page = 2) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean,
+                    ymax = mean),
+                width = .3) +
+  geom_errorbar(aes(x = Treatment_Stage,
+                    ymin = mean - se,
+                    ymax = mean + se),
+                width = .5) +
+  labs(x = "Treatment Stage",
+       y = "Relative ARG Expression") +
+  theme_classic(base_size = 12)
+ggsave("Figures/Trimethoprim2.png", width = 6, height = 4)
