@@ -38,14 +38,14 @@ Flags_Removed <- mutate(Flags_Removed,
 # Fill in sample IDs.
 # I swapped ASP Distribution to be Sample 1 as it's the earliest stage.
 Flags_Removed <- mutate(Flags_Removed, ID = case_when(
-  str_detect(Sample, "1A") ~ "B",
-  str_detect(Sample, "2A") ~ "C",
-  str_detect(Sample, "3A") ~ "D" ,
-  str_detect(Sample, "4A") ~ "E",
-  str_detect(Sample, "5A") ~ "F",
-  str_detect(Sample, "6A") ~ "G",
-  str_detect(Sample, "7A") ~ "A",
-  str_detect(Sample, "8A") ~ "H"))
+  str_detect(Sample, "1A") ~ "A",
+  str_detect(Sample, "2A") ~ "B",
+  str_detect(Sample, "3A") ~ "C" ,
+  str_detect(Sample, "4A") ~ "D",
+  str_detect(Sample, "5A") ~ "E",
+  str_detect(Sample, "6A") ~ "F",
+  str_detect(Sample, "7A") ~ "ASP",
+  str_detect(Sample, "8A") ~ "G"))
 
 # Remove "solo" results.
 Solo_Removed <- ddply(Flags_Removed, c("Assay", "ID"),
@@ -58,36 +58,36 @@ Solo_Removed$Efficiency = NULL
 # We now have to remove entries with no amplification at the ASP location.
 # ASP is the first location during the treatment process we have data for.
 # Make a list of unique genes that have data for the ASP location, then filter by that. list.
-List_AssayID <- unique(Solo_Removed[grepl("A",Solo_Removed$ID),]$Assay)
+List_AssayID <- unique(Solo_Removed[grepl("ASP",Solo_Removed$ID),]$Assay)
 Only_ASP <- dplyr::filter(Solo_Removed, Assay %in% List_AssayID)
 
 # Mutate the sample column to not begin with a number, for easier coding and recognition.
 Only_ASP$SampleID = NA
 Mutated_SampleID <- mutate(Only_ASP, SampleID = case_when(
-  str_detect(Sample, "1A-rep1") ~ "B_rep1",
-  str_detect(Sample, "1A-rep2") ~ "B_rep2",
-  str_detect(Sample, "1A-rep3") ~ "B_rep3",
-  str_detect(Sample, "2A-rep1") ~ "C_rep1",
-  str_detect(Sample, "2A-rep2") ~ "C_rep2",
-  str_detect(Sample, "2A-rep3") ~ "C_rep3",
-  str_detect(Sample, "3A-rep1") ~ "D_rep1" ,
-  str_detect(Sample, "3A-rep2") ~ "D_rep2" ,
-  str_detect(Sample, "3A-rep3") ~ "D_rep3" ,
-  str_detect(Sample, "4A-rep1") ~ "E_rep1",
-  str_detect(Sample, "4A-rep2") ~ "E_rep2",
-  str_detect(Sample, "4A-rep3") ~ "E_rep3",
-  str_detect(Sample, "5A-rep1") ~ "F_rep1",
-  str_detect(Sample, "5A-rep2") ~ "F_rep2",
-  str_detect(Sample, "5A-rep3") ~ "F_rep3",
-  str_detect(Sample, "6A-rep1") ~ "G_rep1",
-  str_detect(Sample, "6A-rep2") ~ "G_rep2",
-  str_detect(Sample, "6A-rep3") ~ "G_rep3",
-  str_detect(Sample, "7A-rep1") ~ "A_rep1",
-  str_detect(Sample, "7A-rep2") ~ "A_rep2",
-  str_detect(Sample, "7A-rep3") ~ "A_rep3",
-  str_detect(Sample, "8A-rep1") ~ "H_rep1",
-  str_detect(Sample, "8A-rep2") ~ "H_rep2",
-  str_detect(Sample, "8A-rep3") ~ "H_rep3"))
+  str_detect(Sample, "1A-rep1") ~ "A_rep1",
+  str_detect(Sample, "1A-rep2") ~ "A_rep2",
+  str_detect(Sample, "1A-rep3") ~ "A_rep3",
+  str_detect(Sample, "2A-rep1") ~ "B_rep1",
+  str_detect(Sample, "2A-rep2") ~ "B_rep2",
+  str_detect(Sample, "2A-rep3") ~ "B_rep3",
+  str_detect(Sample, "3A-rep1") ~ "C_rep1" ,
+  str_detect(Sample, "3A-rep2") ~ "C_rep2" ,
+  str_detect(Sample, "3A-rep3") ~ "C_rep3" ,
+  str_detect(Sample, "4A-rep1") ~ "D_rep1",
+  str_detect(Sample, "4A-rep2") ~ "D_rep2",
+  str_detect(Sample, "4A-rep3") ~ "D_rep3",
+  str_detect(Sample, "5A-rep1") ~ "E_rep1",
+  str_detect(Sample, "5A-rep2") ~ "E_rep2",
+  str_detect(Sample, "5A-rep3") ~ "E_rep3",
+  str_detect(Sample, "6A-rep1") ~ "F_rep1",
+  str_detect(Sample, "6A-rep2") ~ "F_rep2",
+  str_detect(Sample, "6A-rep3") ~ "F_rep3",
+  str_detect(Sample, "7A-rep1") ~ "ASP_rep1",
+  str_detect(Sample, "7A-rep2") ~ "ASP_rep2",
+  str_detect(Sample, "7A-rep3") ~ "ASP_rep3",
+  str_detect(Sample, "8A-rep1") ~ "G_rep1",
+  str_detect(Sample, "8A-rep2") ~ "G_rep2",
+  str_detect(Sample, "8A-rep3") ~ "G_rep3"))
 
 # Remove the original Sample ID column, as it has been replaced.
 Mutated_SampleID$Sample = NULL
@@ -192,13 +192,13 @@ Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P,
 
 # Add sample IDs in their column.
 Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P, Treatment_Stage = case_when(
+  str_detect(SampleID, "A") ~ "A",
   str_detect(SampleID, "B") ~ "B",
   str_detect(SampleID, "C") ~ "C",
-  str_detect(SampleID, "D") ~ "D" ,
+  str_detect(SampleID, "D") ~ "D",
   str_detect(SampleID, "E") ~ "E",
   str_detect(SampleID, "F") ~ "F",
-  str_detect(SampleID, "G") ~ "G",
-  str_detect(SampleID, "H") ~ "H"))
+  str_detect(SampleID, "G") ~ "G"))
 
 # Remove the joined sample ID column, as it has been split.
 Rearranged_DDCt_P$SampleID = NULL
@@ -274,13 +274,13 @@ ggplot(data = Annotated_DDCtP, mapping =
 
 # Split based on Treatment Stage.
 Split <- split(Annotated_DDCtP, Annotated_DDCtP$Treatment_Stage)
+A <- Split$A
 B <- Split$B
 C <- Split$C
 D <- Split$D
 E <- Split$E
 F <- Split$F
 G <- Split$G
-H <- Split$H
 
 # Rename dataset for model.
 DDCtP_LM <- DDCtP_Wide
@@ -289,22 +289,30 @@ str(DDCtP_LM)
 
 # Create model.
 # How does DDCtTwoP change across each location for each gene?
-B_lm <- lm(DDCtTwoP ~ Gene, data = B)
+A_lm <- lm(DDCtTwoP ~ Gene, data = A)
 
 # Use tidy to neaten table and add confidence intervals.
-B_out_conf <- tidy(B_lm, conf.int = TRUE)
+A_out_conf <- tidy(A_lm, conf.int = TRUE)
 
 # Needed to strip term names.
 # Strip out prefix in term column.
-B_out_conf$nicelabs <- prefix_strip(B_out_conf$term, "Gene")
+A_out_conf$nicelabs <- prefix_strip(A_out_conf$term, "Gene")
 
 # Augment generates Cook's distance, residual values and fitted values.
-B_out_aug <- augment(B_lm)
+A_out_aug <- augment(A_lm)
 
 # Create new column to show location.
-B_out_aug$Treatment_Stage = "B"
+A_out_aug$Treatment_Stage = "A"
 
 # Summary model values.
+glance(A_lm)
+
+# repeat for B.
+B_lm <- lm(DDCtTwoP ~ Gene, data = B)
+B_out_conf <- tidy(B_lm, conf.int = TRUE)
+B_out_conf$nicelabs <- prefix_strip(B_out_conf$term, "Gene")
+B_out_aug <- augment(B_lm)
+B_out_aug$Treatment_Stage = "B"
 glance(B_lm)
 
 # repeat for C.
@@ -347,22 +355,14 @@ G_out_aug <- augment(G_lm)
 G_out_aug$Treatment_Stage = "G"
 glance(G_lm)
 
-# repeat for H.
-H_lm <- lm(DDCtTwoP ~ Gene, data = H)
-H_out_conf <- tidy(H_lm, conf.int = TRUE)
-H_out_conf$nicelabs <- prefix_strip(H_out_conf$term, "Gene")
-H_out_aug <- augment(H_lm)
-H_out_aug$Treatment_Stage = "H"
-glance(H_lm)
-
 # Join all tables together.
-Full_lm_out <- rbind.data.frame(B_out_aug,
+Full_lm_out <- rbind.data.frame(A_out_aug,
+                                B_out_aug,
                                 C_out_aug,
                                 D_out_aug,
                                 E_out_aug,
                                 F_out_aug,
-                                G_out_aug,
-                                H_out_aug)
+                                G_out_aug)
 
 # Join with the assay information.
 Annotated_Full_Model <- full_join(Full_lm_out, Assay_Information,
@@ -383,9 +383,45 @@ Annotated_Full_Summary <- Annotated_Full_Model %>%
 All_Data <- full_join(Annotated_Full_Summary, Annotated_Full_Model,
                       by = c("Gene" = "Gene", "Treatment_Stage" = "Treatment_Stage"))
 
+# create a table for tidy data
+write.csv(All_Data, "AllData.csv", row.names = FALSE)
 # ------------GRAPHS------------------
+# Loop in ggplot.
+n = 150
+pdf("resistomap.pdf", paper= 'A4r', width = 8, height = 6)
+for (i in 1:n) {
+  print(ggplot(data = All_Data,
+               aes(x = Treatment_Stage,
+                   y = mean)) +
+          geom_point() +
+          facet_wrap_paginate(vars(Gene), scales = "free",
+                              ncol = 1, nrow = 1, page = i) +
+          geom_errorbar(aes(x = Treatment_Stage,
+                            ymin = mean,
+                            ymax = mean),
+                        width = .3) +
+          geom_errorbar(aes(x = Treatment_Stage,
+                            ymin = mean - se,
+                            ymax = mean + se),
+                        width = .5) +
+          labs(x = "Treatment Stage",
+               y = "Normalised Gene Expression") +
+          theme_bw(base_size = 12) + facet_wrap_paginate(vars(Gene), scales = "free",
+                                                              ncol = 1, nrow = 1, page = i))}
+dev.off()
 
-#split table based on target antibiotic?
+# heatmap
+mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
+ggplot(All_Data, aes(y = Gene, x = Treatment_Stage, fill = mean)) +
+  geom_tile(aes(fill = mean)) +
+  scale_fill_gradientn(colours = mycol, trans = "log") +
+  labs(x = "Wastewater Treatment Stage", 
+       y = "Gene", 
+       fill = "Gene Prevalence") +
+  theme_bw()
+ggsave("Figures/HeatmapTotalGene.png", width = 6, height = 30)
+
+#split table based on target antibiotic??
 Split <- split(All_Data, All_Data$Target_Antibiotic)
 Aminoglycoside <- Split$Aminoglycoside
 Beta_Lactam <- Split$`Beta Lactam`
@@ -400,29 +436,4 @@ Sulfonamide <- Split$Sulfonamide
 Tetracycline <- Split$Tetracycline
 Trimethoprim <- Split$Trimethoprim
 
-# create a table for tidy data
-write.csv(All_Data, "AllData.csv", row.names = FALSE)
-
-# Attempt a loop for graphs.
-n = 13
-pdf("figure.pdf", paper= 'A4r', width = 11, height = 8)
-for (i in 1:n) {
-  print(ggplot(data = All_Data,
-                     aes(x = Treatment_Stage,
-                         y = mean)) +
-          geom_point() +
-          facet_wrap_paginate(vars(Gene), scales = "free",
-                              ncol = 1, nrow = 1, page = i) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean,
-                            ymax = mean),
-                        width = .3) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean - se,
-                            ymax = mean + se),
-                        width = .5) +
-          labs(x = "Treatment Stage",
-               y = "Relative ARG Expression") +
-          theme_classic(base_size = 12) + facet_wrap_paginate(vars(Gene), scales = "free",
-                                 ncol = 4, nrow = 4, page = i))}
-dev.off()
+# seperate heatmaps?
