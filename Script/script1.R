@@ -1,0 +1,439 @@
+#-------------SETUP-------------------
+# Choose working directory.
+setwd("~/GitHub/resistomap-2021")
+# Load (and possibly install) packages required.
+library(plyr)
+library(tidyverse)
+library(readr)
+library(broom)
+library(modelr)
+library(socviz)
+library(ggforce)
+library(colorBlindness)
+
+# Import raw dataset.
+# I converted the Excel page needed into csv format first.
+Raw_Data <- read_csv("Data-Raw/rawdata.csv")
+
+# Remove unsatisfactory flags.
+Flags_Removed <- Raw_Data[!grepl('CurveFitFail|MultipleMeltPeak|NoAmplification',
+                                 Raw_Data$Flags),]
+# Remove flags column, as it's no longer needed.
+Flags_Removed$Flags = NULL
+
+# ------------WRANGLE---------------------------
+# Add individual sample locations for removing "solo" results.
+# "Solo" results are when out of the three repeats, there was only amplification in one sample.
+Flags_Removed$ID = NA
+Flags_Removed$Replicate = NA
+
+# Fill in replicate IDs.
+Flags_Removed <- mutate(Flags_Removed,
+                        Replicate = case_when(
+                          str_detect(Sample, "rep1") ~ "1",
+                          str_detect(Sample, "rep2") ~ "2",
+                          str_detect(Sample, "rep3") ~ "3" ))
+
+# Fill in sample IDs.
+# I swapped ASP Distribution to be Sample 1 as it's the earliest stage.
+Flags_Removed <- mutate(Flags_Removed, ID = case_when(
+  str_detect(Sample, "1A") ~ "A",
+  str_detect(Sample, "2A") ~ "B",
+  str_detect(Sample, "3A") ~ "C" ,
+  str_detect(Sample, "4A") ~ "D",
+  str_detect(Sample, "5A") ~ "E",
+  str_detect(Sample, "6A") ~ "F",
+  str_detect(Sample, "7A") ~ "ASP",
+  str_detect(Sample, "8A") ~ "G"))
+
+# Remove "solo" results.
+Solo_Removed <- ddply(Flags_Removed, c("Assay", "ID"),
+                      function(d) {if (nrow(d) > 1) d else NULL})
+
+# Remove Tm and Efficiency columns as we're focusing on cycle threshold.
+Solo_Removed$Tm = NULL
+Solo_Removed$Efficiency = NULL
+
+# We now have to remove entries with no amplification at the ASP location.
+# ASP is the first location during the treatment process we have data for.
+# Make a list of unique genes that have data for the ASP location, then filter by that. list.
+List_AssayID <- unique(Solo_Removed[grepl("ASP",Solo_Removed$ID),]$Assay)
+Only_ASP <- dplyr::filter(Solo_Removed, Assay %in% List_AssayID)
+
+# Mutate the sample column to not begin with a number, for easier coding and recognition.
+Only_ASP$SampleID = NA
+Mutated_SampleID <- mutate(Only_ASP, SampleID = case_when(
+  str_detect(Sample, "1A-rep1") ~ "A_rep1",
+  str_detect(Sample, "1A-rep2") ~ "A_rep2",
+  str_detect(Sample, "1A-rep3") ~ "A_rep3",
+  str_detect(Sample, "2A-rep1") ~ "B_rep1",
+  str_detect(Sample, "2A-rep2") ~ "B_rep2",
+  str_detect(Sample, "2A-rep3") ~ "B_rep3",
+  str_detect(Sample, "3A-rep1") ~ "C_rep1" ,
+  str_detect(Sample, "3A-rep2") ~ "C_rep2" ,
+  str_detect(Sample, "3A-rep3") ~ "C_rep3" ,
+  str_detect(Sample, "4A-rep1") ~ "D_rep1",
+  str_detect(Sample, "4A-rep2") ~ "D_rep2",
+  str_detect(Sample, "4A-rep3") ~ "D_rep3",
+  str_detect(Sample, "5A-rep1") ~ "E_rep1",
+  str_detect(Sample, "5A-rep2") ~ "E_rep2",
+  str_detect(Sample, "5A-rep3") ~ "E_rep3",
+  str_detect(Sample, "6A-rep1") ~ "F_rep1",
+  str_detect(Sample, "6A-rep2") ~ "F_rep2",
+  str_detect(Sample, "6A-rep3") ~ "F_rep3",
+  str_detect(Sample, "7A-rep1") ~ "ASP_rep1",
+  str_detect(Sample, "7A-rep2") ~ "ASP_rep2",
+  str_detect(Sample, "7A-rep3") ~ "ASP_rep3",
+  str_detect(Sample, "8A-rep1") ~ "G_rep1",
+  str_detect(Sample, "8A-rep2") ~ "G_rep2",
+  str_detect(Sample, "8A-rep3") ~ "G_rep3"))
+
+# Remove the original Sample ID column, as it has been replaced.
+Mutated_SampleID$Sample = NULL
+
+# Pivot the table wider.
+Mutated_Wide <- Mutated_SampleID %>%
+  pivot_wider(names_from = Assay, values_from = Ct)
+
+# Remove extra unneeded columns
+Mutated_Wide$ID = NULL
+Mutated_Wide$Replicate = NULL
+
+# Create sample ID list.
+SampleID <- Mutated_Wide$SampleID
+
+# Pivot the table back to longer.
+Mutated_Long <- Mutated_Wide %>%
+  pivot_longer(
+    cols = AY1:AY96, names_to = "Assay", values_to = "Ct")
+
+# Pivot the table again, so Sample ID is across the top, rather than Assay.
+Mutated_Wide_2 <- Mutated_Long %>%
+  pivot_wider(
+    names_from = SampleID, values_from = Ct)
+
+# Transpose the table.
+Transposed_Ct <- t(Mutated_Wide_2[2:25])
+
+# Make sure the top row is the Assay codes, by first extracting as a list.
+Assay_Names <- t(Mutated_Wide_2[1])
+colnames(Transposed_Ct) <- as.character(Assay_Names[1,])
+
+# Calculate Delta Ct and make sure the output is as a data frame.
+as.data.frame(Transposed_Ct)
+Delta_Ct <- Transposed_Ct[ , 2:137] - Transposed_Ct[ , "AY1"]
+DF_Delta_Ct <- as.data.frame(Delta_Ct)
+
+# Start with ASP values on their own.
+Delta_Ct_ASP <- head(DF_Delta_Ct, 3)
+
+# Turn the rownames into the first column to preserve them.
+Delta_Ct_ASP_Rownames <- rownames_to_column(Delta_Ct_ASP, "SampleID")
+
+# Calculate the sum of each column.
+Delta_Ct_ASP_Sum <- as.data.frame(colSums(Delta_Ct_ASP_Rownames[ , -1], na.rm = TRUE))
+
+# Rename the resulting sum column.
+Delta_Ct_ASP_Sum_Rownames <- rownames_to_column(Delta_Ct_ASP_Sum, "Assay")
+names(Delta_Ct_ASP_Sum_Rownames)[2] <- "Sum_Delta_Ct"
+
+# Pivot wider ready for mean calculation.
+Delta_Ct_ASP_Sum_Wide <- pivot_wider(Delta_Ct_ASP_Sum_Rownames,
+                                     names_from = "Assay",
+                                     values_from = "Sum_Delta_Ct")
+
+# Pivot longer for counting data entries.
+Delta_Ct_ASP_Long <- pivot_longer(Delta_Ct_ASP_Sum_Wide,
+                                  cols = AY10:AY96,
+                                  names_to = "Assay",
+                                  values_to = "Delta_Ct",
+                                  values_drop_na = TRUE)
+
+# Count the frequency for each gene.
+Delta_Ct_ASP_Count <- as.data.frame(table(Delta_Ct_ASP_Long$Assay))
+
+# Pivot wider again.
+Delta_Ct_ASP_Count_Wide <- as.data.frame(pivot_wider(Delta_Ct_ASP_Count,
+                                                     names_from = "Var1",
+                                                     values_from = "Freq"))
+
+# Calculate ASP means for Delta Delta Ct calculation.
+Delta_Ct_ASP_Mean <- as.data.frame(Delta_Ct_ASP_Sum_Wide * Delta_Ct_ASP_Count_Wide)
+
+# Calculate Delta Delta Ct.
+Delta_Delta_Ct <- DF_Delta_Ct - as.list(Delta_Ct_ASP_Mean)
+
+# Remove ASP values from main table.
+Delta_Delta_Ct_No_ASP <- tail(Delta_Delta_Ct, -3)
+
+# Calculate 2^DDC, or is it better to log2 later?
+DDCt_Power <- 2^-(Delta_Delta_Ct_No_ASP)
+
+# Convert row names to a column of their own to protect them.
+DDCt_Power_Loc <- rownames_to_column(DDCt_Power, "SampleID")
+
+# ------------ANALYSIS----------------
+
+# Add replicate and ID columns.
+DDCt_P <- DDCt_Power_Loc
+DDCt_P$Replicate = NA
+DDCt_P$Treatment_Stage = NA
+
+# Rearrange the columns to make it easier.
+Rearranged_DDCt_P <- subset(DDCt_P, select = c(
+  SampleID, Treatment_Stage, Replicate, AY10:AY96))
+
+Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P,
+                            Replicate = case_when(
+                              str_detect(SampleID, "rep1") ~ "rep1",
+                              str_detect(SampleID, "rep2") ~ "rep2",
+                              str_detect(SampleID, "rep3") ~ "rep3" ))
+
+# Add sample IDs in their column.
+Rearranged_DDCt_P <- mutate(Rearranged_DDCt_P, Treatment_Stage = case_when(
+  str_detect(SampleID, "A") ~ "A",
+  str_detect(SampleID, "B") ~ "B",
+  str_detect(SampleID, "C") ~ "C",
+  str_detect(SampleID, "D") ~ "D",
+  str_detect(SampleID, "E") ~ "E",
+  str_detect(SampleID, "F") ~ "F",
+  str_detect(SampleID, "G") ~ "G"))
+
+# Remove the joined sample ID column, as it has been split.
+Rearranged_DDCt_P$SampleID = NULL
+
+# Pivot longer.
+DDCt_P_Long <- pivot_longer(Rearranged_DDCt_P,
+                            cols = AY10:AY96,
+                            names_to = "Assay",
+                            values_to = "DDCtTwoP",
+                            values_drop_na = TRUE)
+
+DDCt_ASP_Power <- 2^-(Delta_Ct_ASP_Mean)
+DDCt_ASP_Mean_Long <- pivot_longer(DDCt_ASP_Power,
+                                   cols = AY10:AY96,
+                                   names_to = "Assay",
+                                   values_to = "ASP_DCt")
+
+# Join the ASP and long table together.
+DDCtP_With_ASP <- full_join(DDCt_P_Long, DDCt_ASP_Mean_Long,
+                            by = c("Assay" = "Assay"))
+
+# ------------ANNOTATONS-------
+
+# Import assay information.
+Assay_Information <- read_csv("Data-Raw/assayinformation.csv")
+
+# Remove the columns not needed.
+Assay_Information$`Forward Primer` = NULL
+Assay_Information$`Reverse Primer` = NULL
+
+# Change column names for easier code.
+colnames(Assay_Information) = c("Assay", "Gene", "Target_Antibiotic")
+
+# Remove Taxonomic genes for now, focus on resistance genes.
+Assay_Information <- Assay_Information[!grepl('Taxanomic',
+                                              Assay_Information$Target_Antibiotic),]
+
+# Join the main table with the assay information.
+Annotated_DDCtP <- full_join(DDCtP_With_ASP, Assay_Information,
+                             by = c("Assay" = "Assay"))
+
+# Remove any NAs
+Annotated_DDCtP <- Annotated_DDCtP %>% drop_na()
+
+# Rearrange columns.
+Annotated_DDCtP <- subset(Annotated_DDCtP, select = c(
+  Assay, Treatment_Stage, Gene, DDCtTwoP, ASP_DCt, Target_Antibiotic, Replicate))
+
+# Calculate the standard errors.
+DDCtP_Summary <- Annotated_DDCtP %>%
+  group_by(Gene, Treatment_Stage) %>%
+  summarise(mean = mean(DDCtTwoP),
+            std = sd(DDCtTwoP),
+            n = length(DDCtTwoP),
+            se = std/sqrt(n))
+
+Summary_DDCtP <- Annotated_DDCtP
+Summary_DDCtP$Assay = NULL
+
+# Potentially create a wide format table with the summary information.
+DDCtP_Wide <- pivot_wider(Annotated_DDCtP,
+                          names_from = Gene,
+                          values_from = DDCtTwoP)
+
+# ------------MODEL-------
+# Produce initial plot.
+ggplot(data = Annotated_DDCtP, mapping =
+         aes(Treatment_Stage, DDCtTwoP)) +
+  geom_violin() +
+  facet_wrap_paginate(facets = vars(Target_Antibiotic),
+                      ncol = 4,
+                      scales = "free_x")
+
+# Split based on Treatment Stage.
+Split <- split(Annotated_DDCtP, Annotated_DDCtP$Treatment_Stage)
+A <- Split$A
+B <- Split$B
+C <- Split$C
+D <- Split$D
+E <- Split$E
+F <- Split$F
+G <- Split$G
+
+# Rename dataset for model.
+DDCtP_LM <- DDCtP_Wide
+DDCtP_LM <- na.omit(DDCtP_LM)
+str(DDCtP_LM)
+
+# Create model.
+# How does DDCtTwoP change across each location for each gene?
+A_lm <- lm(DDCtTwoP ~ Gene, data = A)
+
+# Use tidy to neaten table and add confidence intervals.
+A_out_conf <- tidy(A_lm, conf.int = TRUE)
+
+# Needed to strip term names.
+# Strip out prefix in term column.
+A_out_conf$nicelabs <- prefix_strip(A_out_conf$term, "Gene")
+
+# Augment generates Cook's distance, residual values and fitted values.
+A_out_aug <- augment(A_lm)
+
+# Create new column to show location.
+A_out_aug$Treatment_Stage = "A"
+
+# Summary model values.
+glance(A_lm)
+
+# repeat for B.
+B_lm <- lm(DDCtTwoP ~ Gene, data = B)
+B_out_conf <- tidy(B_lm, conf.int = TRUE)
+B_out_conf$nicelabs <- prefix_strip(B_out_conf$term, "Gene")
+B_out_aug <- augment(B_lm)
+B_out_aug$Treatment_Stage = "B"
+glance(B_lm)
+
+# repeat for C.
+C_lm <- lm(DDCtTwoP ~ Gene, data = C)
+C_out_conf <- tidy(C_lm, conf.int = TRUE)
+C_out_conf$nicelabs <- prefix_strip(C_out_conf$term, "Gene")
+C_out_aug <- augment(C_lm)
+C_out_aug$Treatment_Stage = "C"
+glance(C_lm)
+
+# repeat for D.
+D_lm <- lm(DDCtTwoP ~ Gene, data = D)
+D_out_conf <- tidy(D_lm, conf.int = TRUE)
+D_out_conf$nicelabs <- prefix_strip(D_out_conf$term, "Gene")
+D_out_aug <- augment(D_lm)
+D_out_aug$Treatment_Stage = "D"
+glance(D_lm)
+
+# repeat for E.
+E_lm <- lm(DDCtTwoP ~ Gene, data = E)
+E_out_conf <- tidy(E_lm, conf.int = TRUE)
+E_out_conf$nicelabs <- prefix_strip(E_out_conf$term, "Gene")
+E_out_aug <- augment(E_lm)
+E_out_aug$Treatment_Stage = "E"
+glance(E_lm)
+
+# repeat for F.
+F_lm <- lm(DDCtTwoP ~ Gene, data = F)
+F_out_conf <- tidy(F_lm, conf.int = TRUE)
+F_out_conf$nicelabs <- prefix_strip(F_out_conf$term, "Gene")
+F_out_aug <- augment(F_lm)
+F_out_aug$Treatment_Stage = "F"
+glance(F_lm)
+
+# repeat for G.
+G_lm <- lm(DDCtTwoP ~ Gene, data = G)
+G_out_conf <- tidy(G_lm, conf.int = TRUE)
+G_out_conf$nicelabs <- prefix_strip(G_out_conf$term, "Gene")
+G_out_aug <- augment(G_lm)
+G_out_aug$Treatment_Stage = "G"
+glance(G_lm)
+
+# Join all tables together.
+Full_lm_out <- rbind.data.frame(A_out_aug,
+                                B_out_aug,
+                                C_out_aug,
+                                D_out_aug,
+                                E_out_aug,
+                                F_out_aug,
+                                G_out_aug)
+
+# Join with the assay information.
+Annotated_Full_Model <- full_join(Full_lm_out, Assay_Information,
+                                  by = c("Gene" = "Gene"))
+
+Annotated_Full_Model <- Annotated_Full_Model %>% drop_na()
+Annotated_Full_Model$Assay = NULL
+
+# Re-do summary table.
+Annotated_Full_Summary <- Annotated_Full_Model %>%
+  group_by(Gene, Treatment_Stage) %>%
+  summarise(mean = mean(DDCtTwoP),
+            std = sd(DDCtTwoP),
+            n = length(DDCtTwoP),
+            se = std/sqrt(n))
+
+# Join summary and model table.
+All_Data <- full_join(Annotated_Full_Summary, Annotated_Full_Model,
+                      by = c("Gene" = "Gene", "Treatment_Stage" = "Treatment_Stage"))
+
+# create a table for tidy data
+write.csv(All_Data, "AllData.csv", row.names = FALSE)
+# ------------GRAPHS------------------
+# Loop in ggplot.
+n = 150
+pdf("resistomap.pdf", paper= 'A4r', width = 8, height = 6)
+for (i in 1:n) {
+  print(ggplot(data = All_Data,
+               aes(x = Treatment_Stage,
+                   y = mean)) +
+          geom_point() +
+          facet_wrap_paginate(vars(Gene), scales = "free",
+                              ncol = 1, nrow = 1, page = i) +
+          geom_errorbar(aes(x = Treatment_Stage,
+                            ymin = mean,
+                            ymax = mean),
+                        width = .3) +
+          geom_errorbar(aes(x = Treatment_Stage,
+                            ymin = mean - se,
+                            ymax = mean + se),
+                        width = .5) +
+          labs(x = "Treatment Stage",
+               y = "Normalised Gene Expression") +
+          theme_bw(base_size = 12) + facet_wrap_paginate(vars(Gene), scales = "free",
+                                                         ncol = 1, nrow = 1, page = i))}
+dev.off()
+
+# heatmap
+mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
+ggplot(All_Data, aes(y = Gene, x = Treatment_Stage, fill = mean)) +
+  geom_tile(aes(fill = mean)) +
+  scale_fill_gradientn(colours = mycol, trans = "log") +
+  labs(x = "Wastewater Treatment Stage", 
+       y = "Gene", 
+       fill = "Gene Prevalence") +
+  theme_bw()
+ggsave("Figure/HeatmapTotalGene.png", width = 6, height = 30)
+
+#split table based on target antibiotic??
+Split <- split(All_Data, All_Data$Target_Antibiotic)
+Aminoglycoside <- Split$Aminoglycoside
+Beta_Lactam <- Split$`Beta Lactam`
+Integrons <- Split$Integrons
+MDR <- Split$MDR
+MGE <- Split$MGE
+MLSB <- Split$MLSB
+Other <- Split$Other
+Phenicol <- Split$Phenicol
+Quinolone <- Split$Quinolone
+Sulfonamide <- Split$Sulfonamide
+Tetracycline <- Split$Tetracycline
+Trimethoprim <- Split$Trimethoprim
+
+# seperate heatmaps?
+
