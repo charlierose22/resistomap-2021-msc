@@ -1,3 +1,9 @@
+library(plyr)
+library(tidyverse)
+library(ggforce)
+library(broom)
+library(socviz)
+
 # import raw dataset
 rawdata <- readr::read_csv("Data-Raw/rawdata.csv") %>% janitor::clean_names()
 
@@ -174,13 +180,13 @@ rearranged_ddct_p <- mutate(rearranged_ddct_p,
 
 # Add sample IDs in their column.
 rearranged_ddct_p <- mutate(rearranged_ddct_p, treatment_stage = case_when(
-  str_detect(sample_id, "A") ~ "A",
-  str_detect(sample_id, "B") ~ "B",
-  str_detect(sample_id, "C") ~ "C",
-  str_detect(sample_id, "D") ~ "D",
-  str_detect(sample_id, "E") ~ "E",
-  str_detect(sample_id, "F") ~ "F",
-  str_detect(sample_id, "G") ~ "G"))
+  str_detect(sample_id, "A") ~ "a",
+  str_detect(sample_id, "B") ~ "b",
+  str_detect(sample_id, "C") ~ "c",
+  str_detect(sample_id, "D") ~ "d",
+  str_detect(sample_id, "E") ~ "e",
+  str_detect(sample_id, "F") ~ "f",
+  str_detect(sample_id, "G") ~ "g"))
 
 # Remove the joined sample ID column, as it has been split.
 rearranged_ddct_p$sample_id = NULL
@@ -224,198 +230,145 @@ annotated_ddct_p <- full_join(ddct_p_with_asp, assay_information,
                              by = c("assay" = "assay"))
 
 # Remove any NAs
-Annotated_DDCtP <- Annotated_DDCtP %>% drop_na()
+annotated_ddct_p <- annotated_ddct_p %>% drop_na()
 
 # Rearrange columns.
-Annotated_DDCtP <- subset(Annotated_DDCtP, select = c(
-  Assay, Treatment_Stage, Gene, DDCtTwoP, ASP_DCt, Target_Antibiotic, Replicate))
+annotated_ddct_p <- subset(annotated_ddct_p, select = c(
+  assay, treatment_stage, gene, ddct_two_p, asp_dct, target_antibiotic, replicate))
 
 # Calculate the standard errors.
-DDCtP_Summary <- Annotated_DDCtP %>%
-  group_by(Gene, Treatment_Stage) %>%
-  summarise(mean = mean(DDCtTwoP),
-            std = sd(DDCtTwoP),
-            n = length(DDCtTwoP),
+ddct_p_summary <- annotated_ddct_p %>%
+  group_by(gene, treatment_stage) %>%
+  summarise(mean = mean(ddct_two_p),
+            std = sd(ddct_two_p),
+            n = length(ddct_two_p),
             se = std/sqrt(n))
 
-Summary_DDCtP <- Annotated_DDCtP
-Summary_DDCtP$Assay = NULL
+summary_ddct_p <- annotated_ddct_p
+summary_ddct_p$assay = NULL
 
 # Potentially create a wide format table with the summary information.
-DDCtP_Wide <- pivot_wider(Annotated_DDCtP,
-                          names_from = Gene,
-                          values_from = DDCtTwoP)
+ddct_p_wide <- pivot_wider(annotated_ddct_p,
+                          names_from = gene,
+                          values_from = ddct_two_p)
 
 # Produce initial plot.
-ggplot(data = Annotated_DDCtP, mapping =
-         aes(Treatment_Stage, DDCtTwoP)) +
+ggplot(data = annotated_ddct_p, mapping =
+         aes(treatment_stage, ddct_two_p)) +
   geom_violin() +
-  facet_wrap_paginate(facets = vars(Target_Antibiotic),
+  facet_wrap_paginate(facets = vars(target_antibiotic),
                       ncol = 4,
                       scales = "free_x")
+ggsave("Figures/initial_plot.png", width = 6, height = 6)
 
 # Split based on Treatment Stage.
-Split <- split(Annotated_DDCtP, Annotated_DDCtP$Treatment_Stage)
-A <- Split$A
-B <- Split$B
-C <- Split$C
-D <- Split$D
-E <- Split$E
-F <- Split$F
-G <- Split$G
+split <- split(annotated_ddct_p, annotated_ddct_p$treatment_stage)
+a <- split$a
+b <- split$b
+c <- split$c
+d <- split$d
+e <- split$e
+f <- split$f
+g <- split$g
 
 # Rename dataset for model.
-DDCtP_LM <- DDCtP_Wide
-DDCtP_LM <- na.omit(DDCtP_LM)
-str(DDCtP_LM)
+ddct_p_lm <- ddct_p_wide
+ddct_p_lm <- na.omit(ddct_p_lm)
+str(ddct_p_lm)
 
-# Create model.
-# How does DDCtTwoP change across each location for each gene?
-A_lm <- lm(DDCtTwoP ~ Gene, data = A)
+create_lm <- function(data) {
+  # Perform linear regression.
+  lm_out <- lm(ddct_two_p ~ gene, data = data)
+  # Use tidy to neaten table and add confidence intervals.
+  out_conf <- tidy(lm_out, conf.int = TRUE)
+  # Strip out prefix in term column.
+  out_conf$nicelabs <- prefix_strip(out_conf$term, "gene")
+  # Augment generates Cook's distance, residual values and fitted values.
+  out_aug <- augment(lm_out)
+  # Create new column to show location.
+  out_aug$treatment_stage = data$treatment_stage[1]
+  # Combine tables.
+  out_all <- bind_cols(out_aug, out_conf)
+  # Return result.
+  return(out_all)
+}
 
-# Use tidy to neaten table and add confidence intervals.
-A_out_conf <- tidy(A_lm, conf.int = TRUE)
+# Create list of datasets.
+datasets <- list(a, b, c, d, e, f, g)
 
-# Needed to strip term names.
-# Strip out prefix in term column.
-A_out_conf$nicelabs <- prefix_strip(A_out_conf$term, "Gene")
+# Create list of model outputs.
+model_outputs <- list()
 
-# Augment generates Cook's distance, residual values and fitted values.
-A_out_aug <- augment(A_lm)
+# Loop through datasets and create linear model for each one.
+for (i in 1:length(datasets)) {
+  model_outputs[[i]] <- create_lm(datasets[[i]])
+}
 
-# Create new column to show location.
-A_out_aug$Treatment_Stage = "A"
-
-# Summary model values.
-glance(A_lm)
-
-# repeat for B.
-B_lm <- lm(DDCtTwoP ~ Gene, data = B)
-B_out_conf <- tidy(B_lm, conf.int = TRUE)
-B_out_conf$nicelabs <- prefix_strip(B_out_conf$term, "Gene")
-B_out_aug <- augment(B_lm)
-B_out_aug$Treatment_Stage = "B"
-glance(B_lm)
-
-# repeat for C.
-C_lm <- lm(DDCtTwoP ~ Gene, data = C)
-C_out_conf <- tidy(C_lm, conf.int = TRUE)
-C_out_conf$nicelabs <- prefix_strip(C_out_conf$term, "Gene")
-C_out_aug <- augment(C_lm)
-C_out_aug$Treatment_Stage = "C"
-glance(C_lm)
-
-# repeat for D.
-D_lm <- lm(DDCtTwoP ~ Gene, data = D)
-D_out_conf <- tidy(D_lm, conf.int = TRUE)
-D_out_conf$nicelabs <- prefix_strip(D_out_conf$term, "Gene")
-D_out_aug <- augment(D_lm)
-D_out_aug$Treatment_Stage = "D"
-glance(D_lm)
-
-# repeat for E.
-E_lm <- lm(DDCtTwoP ~ Gene, data = E)
-E_out_conf <- tidy(E_lm, conf.int = TRUE)
-E_out_conf$nicelabs <- prefix_strip(E_out_conf$term, "Gene")
-E_out_aug <- augment(E_lm)
-E_out_aug$Treatment_Stage = "E"
-glance(E_lm)
-
-# repeat for F.
-F_lm <- lm(DDCtTwoP ~ Gene, data = F)
-F_out_conf <- tidy(F_lm, conf.int = TRUE)
-F_out_conf$nicelabs <- prefix_strip(F_out_conf$term, "Gene")
-F_out_aug <- augment(F_lm)
-F_out_aug$Treatment_Stage = "F"
-glance(F_lm)
-
-# repeat for G.
-G_lm <- lm(DDCtTwoP ~ Gene, data = G)
-G_out_conf <- tidy(G_lm, conf.int = TRUE)
-G_out_conf$nicelabs <- prefix_strip(G_out_conf$term, "Gene")
-G_out_aug <- augment(G_lm)
-G_out_aug$Treatment_Stage = "G"
-glance(G_lm)
-
-# Join all tables together.
-Full_lm_out <- rbind.data.frame(A_out_aug,
-                                B_out_aug,
-                                C_out_aug,
-                                D_out_aug,
-                                E_out_aug,
-                                F_out_aug,
-                                G_out_aug)
+# Combine all model outputs into one table.
+full_lm_out <- do.call(rbind, model_outputs)
 
 # Join with the assay information.
-Annotated_Full_Model <- full_join(Full_lm_out, Assay_Information,
-                                  by = c("Gene" = "Gene"))
+annotated_full_model <- full_join(full_lm_out, assay_information,
+                                  by = c("gene" = "gene"))
 
-Annotated_Full_Model <- Annotated_Full_Model %>% drop_na()
-Annotated_Full_Model$Assay = NULL
+# Remove NAs and a column from Annotated_Full_Model
+annotated_full_model <- annotated_full_model[
+  complete.cases(annotated_full_model), -which(names(annotated_full_model) == "assay")]
 
-# Re-do summary table.
-Annotated_Full_Summary <- Annotated_Full_Model %>%
-  group_by(Gene, Treatment_Stage) %>%
-  summarise(mean = mean(DDCtTwoP),
-            std = sd(DDCtTwoP),
-            n = length(DDCtTwoP),
+# Calculate summary statistics by Gene and Treatment_Stage
+annotated_full_summary <- annotated_full_model %>%
+  group_by(gene, treatment_stage) %>%
+  summarise(mean = mean(ddct_two_p),
+            std = sd(ddct_two_p),
+            n = n(),
             se = std/sqrt(n))
 
-# Join summary and model table.
-All_Data <- full_join(Annotated_Full_Summary, Annotated_Full_Model,
-                      by = c("Gene" = "Gene", "Treatment_Stage" = "Treatment_Stage"))
+# Join summary and model tables by Gene and Treatment_Stage
+all_data <- full_join(annotated_full_summary, 
+                      annotated_full_model, 
+                      by = c("gene", "treatment_stage"))
 
-# create a table for tidy data
-write.csv(All_Data, "AllData.csv", row.names = FALSE)
-# ------------GRAPHS------------------
-# Loop in ggplot.
-n = 150
+# Write tidy data to CSV file
+write.csv(all_data, "all_data.csv", row.names = FALSE)
+
+# Loop in ggplot to create a PDF file of resistomap
 pdf("resistomap.pdf", paper= 'A4r', width = 8, height = 6)
-for (i in 1:n) {
-  print(ggplot(data = All_Data,
-               aes(x = Treatment_Stage,
-                   y = mean)) +
+lapply(seq(1, 150), function(i) {
+  print(ggplot(data = all_data, aes(x = treatment_stage, y = mean)) +
           geom_point() +
-          facet_wrap_paginate(vars(Gene), scales = "free",
-                              ncol = 1, nrow = 1, page = i) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean,
-                            ymax = mean),
-                        width = .3) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean - se,
-                            ymax = mean + se),
-                        width = .5) +
-          labs(x = "Treatment Stage",
-               y = "Normalised Gene Expression") +
-          theme_bw(base_size = 12) + facet_wrap_paginate(vars(Gene), scales = "free",
-                                                         ncol = 1, nrow = 1, page = i))}
+          facet_wrap_paginate(vars(gene), scales = "free", ncol = 1, nrow = 1, page = i) +
+          geom_errorbar(aes(ymin = mean, ymax = mean), width = .3) +
+          geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = .5) +
+          labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+          theme_bw(base_size = 12) +
+          facet_wrap_paginate(vars(gene), scales = "free", ncol = 1, nrow = 1, page = i)
+  )
+})
 dev.off()
 
-# heatmap
+# Create heatmap of All_Data
 mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
-ggplot(All_Data, aes(y = Gene, x = Treatment_Stage, fill = mean)) +
-  geom_tile(aes(fill = mean)) +
+ggplot(all_data, aes(y = gene, x = treatment_stage, fill = mean)) +
+  geom_tile() +
   scale_fill_gradientn(colours = mycol, trans = "log") +
-  labs(x = "Wastewater Treatment Stage", 
-       y = "Gene", 
-       fill = "Gene Prevalence") +
+  labs(x = "Wastewater Treatment Stage", y = "Gene", fill = "Gene Prevalence") +
   theme_bw()
-ggsave("Figure/HeatmapTotalGene.png", width = 6, height = 30)
+ggsave("Figure/heatmap_total_gene.png", width = 6, height = 30)
 
-#split table based on target antibiotic??
-Split <- split(All_Data, All_Data$Target_Antibiotic)
-Aminoglycoside <- Split$Aminoglycoside
-Beta_Lactam <- Split$`Beta Lactam`
-Integrons <- Split$Integrons
-MDR <- Split$MDR
-MGE <- Split$MGE
-MLSB <- Split$MLSB
-Other <- Split$Other
-Phenicol <- Split$Phenicol
-Quinolone <- Split$Quinolone
-Sulfonamide <- Split$Sulfonamide
-Tetracycline <- Split$Tetracycline
-Trimethoprim <- Split$Trimethoprim
+# Split All_Data into separate tables based on Target_Antibiotic
+split_class <- split(all_data, all_data$target_antibiotic)
 
-# seperate heatmaps?
+# Create separate heatmaps for each Target_Antibiotic
+lapply(names(split_class), function(name) {
+  df <- split_class[[name]]
+  if (nrow(df) > 0) {
+    mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
+    ggplot(df, aes(y = gene, x = treatment_stage, fill = mean)) +
+      geom_tile() +
+      scale_fill_gradientn(colours = mycol, trans = "log") +
+      labs(x = "Wastewater Treatment Stage", y = "Gene", fill = "Gene Prevalence") +
+      theme_bw()
+    ggsave(paste("Figure/heatmap_", name, ".png", sep = ""), width = 6, height = 6)
+  }
+})
+
