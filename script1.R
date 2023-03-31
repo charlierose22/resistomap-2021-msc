@@ -1,6 +1,5 @@
 #-------------SETUP-------------------
-# Choose working directory.
-setwd("~/GitHub/resistomap-2021")
+
 # Load (and possibly install) packages required.
 library(plyr)
 library(tidyverse)
