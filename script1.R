@@ -383,6 +383,15 @@ All_Data <- full_join(Annotated_Full_Summary, Annotated_Full_Model,
 
 # create a table for tidy data
 write.csv(All_Data, "AllData.csv", row.names = FALSE)
+
+# remove all samples except biosolids
+Biosolids <- All_Data[grepl("^[EF]+$", All_Data$Treatment_Stage), ]
+
+Biosolid_Renamed <- mutate(Biosolids, Treatment_Stage = case_when(
+  str_detect(Treatment_Stage, "E") ~ "newdry",
+  str_detect(Treatment_Stage, "F") ~ "olddry"))
+
+
 # ------------GRAPHS------------------
 # Loop in ggplot.
 n = 150
@@ -408,16 +417,66 @@ for (i in 1:n) {
                                                          ncol = 1, nrow = 1, page = i))}
 dev.off()
 
+# Create a list of target antibiotics.
+target_antibiotics <- unique(Biosolid_Renamed$Target_Antibiotic)
+
+# Create a loop for each target antibiotic.
+for (target_antibiotic in target_antibiotics) {
+  
+  # Create a subset of the data for the current target antibiotic.
+  data <- Biosolid_Renamed[Biosolid_Renamed$Target_Antibiotic == target_antibiotic, ]
+  
+  # Create a heatmap of the data.
+  ggplot(data, aes(x = Treatment_Stage, y = Gene, fill = mean)) +
+    geom_tile() +
+    scale_y_discrete(limits = rev) +
+    scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 5e+12) +
+    labs(x = "Sample", y = "Gene", colour = "Prevalence") +
+    theme_bw(base_size = 10) +
+    theme(panel.grid.major = element_line(colour = "gray80"),
+          panel.grid.minor = element_line(colour = "gray80"),
+          axis.text.x = element_text(angle = 90),
+          legend.text = element_text(family = "serif", 
+                                     size = 10), 
+          axis.text = element_text(family = "serif", 
+                                   size = 10),
+          axis.title = element_text(family = "serif",
+                                    size = 10, face = "bold", colour = "gray20"),
+          legend.title = element_text(size = 10,
+                                      family = "serif"),
+          plot.background = element_rect(colour = NA,
+                                         linetype = "solid"), 
+          legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+  
+  # Save the heatmap to a file.
+  ggsave(paste0("Figure/heatmap-", target_antibiotic, ".png"), width = 5, height = 7)
+}
+
 # heatmap
-mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
-ggplot(All_Data, aes(y = Gene, x = Treatment_Stage, fill = mean)) +
-  geom_tile(aes(fill = mean)) +
-  scale_fill_gradientn(colours = mycol, trans = "log") +
-  labs(x = "Wastewater Treatment Stage", 
-       y = "Gene", 
-       fill = "Gene Prevalence") +
-  theme_bw()
-ggsave("Figure/HeatmapTotalGene.png", width = 6, height = 30)
+Biosolid_Renamed %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+              x = Treatment_Stage, 
+              fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 5e+12) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid.png", width = 4, height = 30)
 
 #split table based on target antibiotic??
 Split <- split(All_Data, All_Data$Target_Antibiotic)

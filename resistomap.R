@@ -334,7 +334,7 @@ write.csv(all_data, "all_data.csv", row.names = FALSE)
 # Loop in ggplot to create a PDF file of resistomap
 pdf("resistomap.pdf", paper= 'A4r', width = 8, height = 6)
 lapply(seq(1, 150), function(i) {
-  print(ggplot(data = all_data, aes(x = treatment_stage, y = mean)) +
+  print(ggplot() +
           geom_point() +
           facet_wrap_paginate(vars(gene), scales = "free", ncol = 1, nrow = 1, page = i) +
           geom_errorbar(aes(ymin = mean, ymax = mean), width = .3) +
@@ -348,8 +348,8 @@ dev.off()
 
 # Create heatmap of All_Data
 mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
-ggplot(all_data, aes(y = gene, x = treatment_stage, fill = mean)) +
-  geom_tile() +
+ggplot() +
+  geom_tile(all_data, aes(y = gene, x = treatment_stage, fill = mean)) +
   scale_fill_gradientn(colours = mycol, trans = "log") +
   labs(x = "Wastewater Treatment Stage", y = "Gene", fill = "Gene Prevalence") +
   theme_bw()
@@ -363,8 +363,8 @@ lapply(names(split_class), function(name) {
   df <- split_class[[name]]
   if (nrow(df) > 0) {
     mycol <- c("navy", "blue", "cyan", "lightcyan", "yellow", "red", "red4")
-    ggplot(df, aes(y = gene, x = treatment_stage, fill = mean)) +
-      geom_tile() +
+    ggplot() +
+      geom_tile(df, aes(y = gene, x = treatment_stage, fill = mean)) +
       scale_fill_gradientn(colours = mycol, trans = "log") +
       labs(x = "Wastewater Treatment Stage", y = "Gene", fill = "Gene Prevalence") +
       theme_bw()
