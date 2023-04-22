@@ -453,13 +453,13 @@ for (target_antibiotic in target_antibiotics) {
 }
 
 # heatmap
-Biosolid_Renamed %>% group_by(Target_Antibiotic) %>% 
+Aminoglycoside %>% group_by(Target_Antibiotic) %>% 
   ggplot() +
   geom_tile(aes(y = Gene, 
               x = Treatment_Stage, 
               fill = mean)) +
   scale_y_discrete(limits = rev) +
-  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 5e+12) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 4e+09) +
   labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
   theme_bw(base_size = 10) +
   theme(panel.grid.major = element_line(colour = "gray80"),
@@ -476,22 +476,22 @@ Biosolid_Renamed %>% group_by(Target_Antibiotic) %>%
         plot.background = element_rect(colour = NA,
                                        linetype = "solid"), 
         legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
-ggsave("Figure/heatmap-biosolid.png", width = 4, height = 30)
+ggsave("Figure/heatmap-biosolid-aminoglycoside.png", width = 4, height = 6)
 
 #split table based on target antibiotic??
-Split <- split(All_Data, All_Data$Target_Antibiotic)
-Aminoglycoside <- Split$Aminoglycoside
-Beta_Lactam <- Split$`Beta Lactam`
-Integrons <- Split$Integrons
-MDR <- Split$MDR
-MGE <- Split$MGE
-MLSB <- Split$MLSB
-Other <- Split$Other
-Phenicol <- Split$Phenicol
-Quinolone <- Split$Quinolone
-Sulfonamide <- Split$Sulfonamide
-Tetracycline <- Split$Tetracycline
-Trimethoprim <- Split$Trimethoprim
+Split2 <- split(Biosolid_Renamed, Biosolid_Renamed$Target_Antibiotic)
+Aminoglycoside <- Split2$Aminoglycoside
+Beta_Lactam <- Split2$`Beta Lactam`
+Integrons <- Split2$Integrons
+MDR <- Split2$MDR
+MGE <- Split2$MGE
+MLSB <- Split2$MLSB
+Other <- Split2$Other
+Phenicol <- Split2$Phenicol
+Quinolone <- Split2$Quinolone
+Sulfonamide <- Split2$Sulfonamide
+Tetracycline <- Split2$Tetracycline
+Trimethoprim <- Split2$Trimethoprim
 
 # seperate heatmaps?
 
