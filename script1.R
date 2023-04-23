@@ -478,6 +478,34 @@ Aminoglycoside %>% group_by(Target_Antibiotic) %>%
         legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
 ggsave("Figure/heatmap-biosolid-aminoglycoside.png", width = 4, height = 6)
 
+Beta_Lactam %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 4e+09) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-aminoglycoside.png", width = 4, height = 6)
+
+
+
+
 #split table based on target antibiotic??
 Split2 <- split(Biosolid_Renamed, Biosolid_Renamed$Target_Antibiotic)
 Aminoglycoside <- Split2$Aminoglycoside
