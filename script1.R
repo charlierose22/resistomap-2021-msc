@@ -387,35 +387,389 @@ write.csv(All_Data, "AllData.csv", row.names = FALSE)
 # remove all samples except biosolids
 Biosolids <- All_Data[grepl("^[EF]+$", All_Data$Treatment_Stage), ]
 
-Biosolid_Renamed <- mutate(Biosolids, Treatment_Stage = case_when(
-  str_detect(Treatment_Stage, "E") ~ "newdry",
-  str_detect(Treatment_Stage, "F") ~ "olddry"))
+# Filter the data
+Filtered_Biosolid <- Biosolids %>%
+  group_by(Gene) %>%
+  filter(n_distinct(Treatment_Stage) == 2) %>%
+  ungroup()
 
+Biosolid_Renamed <- mutate(Filtered_Biosolid, Treatment_Stage = case_when(
+  str_detect(Treatment_Stage, "E") ~ "newdry",
+  str_detect(Treatment_Stage, "F") ~ "Aged Biosolid"))
+
+Biosolid_Renamed <- Biosolid_Renamed %>%
+  group_by(Gene, Treatment_Stage, mean) %>%
+  filter(row_number() == 1)
+
+# remove all samples except biosolids for target_antibiotic grouping
+Biosolids_Target <- Annotated_Full_Model[grepl("^[EF]+$", Annotated_Full_Model$Treatment_Stage), ]
+
+# Re-do summary table.
+Annotated_Full_Summary2 <- Biosolids_Target %>%
+  group_by(Target_Antibiotic, Treatment_Stage) %>%
+  summarise(mean = mean(DDCtTwoP),
+            std = sd(DDCtTwoP),
+            n = length(DDCtTwoP),
+            se = std/sqrt(n))
+
+Annotated_Full_Summary2 <- mutate(Annotated_Full_Summary2, Treatment_Stage = case_when(
+  str_detect(Treatment_Stage, "E") ~ "Fresh Biosolid",
+  str_detect(Treatment_Stage, "F") ~ "Aged Biosolid"))
 
 # ------------GRAPHS------------------
-# Loop in ggplot.
-n = 150
-pdf("resistomap.pdf", paper= 'A4r', width = 8, height = 6)
-for (i in 1:n) {
-  print(ggplot(data = All_Data,
-               aes(x = Treatment_Stage,
-                   y = mean)) +
-          geom_point() +
-          facet_wrap_paginate(vars(Gene), scales = "free",
-                              ncol = 1, nrow = 1, page = i) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean,
-                            ymax = mean),
-                        width = .3) +
-          geom_errorbar(aes(x = Treatment_Stage,
-                            ymin = mean - se,
-                            ymax = mean + se),
-                        width = .5) +
-          labs(x = "Treatment Stage",
-               y = "Normalised Gene Expression") +
-          theme_bw(base_size = 12) + facet_wrap_paginate(vars(Gene), scales = "free",
-                                                         ncol = 1, nrow = 1, page = i))}
-dev.off()
+ggplot(data = Annotated_Full_Summary2,
+       mapping = aes(x = Treatment_Stage, y = mean,
+                     group = Target_Antibiotic, color = as.factor(Target_Antibiotic))) +
+  geom_point(size = 1.5, aes(color = Target_Antibiotic)) +
+  geom_line(aes(color =  Target_Antibiotic)) +
+  scale_x_discrete(limits = rev) +
+  labs(x = "Treatment Stage",
+       y = "Mean Gene Expression", colour = "Class") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-target.png", width = 7, height = 5)
+
+Annotated_Full_Summary2 %>%
+  group_by(Target_Antibiotic) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Target_Antibiotic, 
+             shape = Treatment_Stage, size = 1.5)) +
+  geom_point() +
+  geom_line() +
+  scale_x_discrete(limits = rev) +
+    labs(x = "Treatment Stage", y = "Mean Gene Expression", colour = "Class") +
+    theme_bw(base_size = 10) +
+    guides(shape = "none", size = "none") +
+    theme(panel.grid.major = element_line(colour = "gray80"),
+          panel.grid.minor = element_line(colour = "gray80"),
+          axis.text.x = element_text(angle = 90),
+          legend.text = element_text(family = "serif", 
+                                     size = 10), 
+          axis.text = element_text(family = "serif",
+                                   size = 10),
+          axis.title = element_text(family = "serif",
+                                    size = 10, face = "bold", colour = "gray20"),
+          legend.title = element_text(size = 10,
+                                      family = "serif"),
+          plot.background = element_rect(colour = NA,
+                                         linetype = "solid"), 
+          legend.key = element_rect(colour = NA))
+ggsave("Figure/jitter_target.png", width = 7, height = 5)
+
+#split table based on target antibiotic??
+Split2 <- split(Biosolid_Renamed, Biosolid_Renamed$Target_Antibiotic)
+Aminoglycoside <- Split2$Aminoglycoside
+Beta_Lactam <- Split2$`Beta Lactam`
+Integrons <- Split2$Integrons
+MDR <- Split2$MDR
+MGE <- Split2$MGE
+MLSB <- Split2$MLSB
+Other <- Split2$Other
+Phenicol <- Split2$Phenicol
+Quinolone <- Split2$Quinolone
+Sulfonamide <- Split2$Sulfonamide
+Tetracycline <- Split2$Tetracycline
+Trimethoprim <- Split2$Trimethoprim
+Vancomycin <- Split2$Vancomycin
+
+Aminoglycoside %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-aminoglycoside.png", width = 7, height = 5)
+Beta_Lactam %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-beta-lactam.png", width = 4, height = 4)
+Integrons %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-integron.png", width = 4, height = 4)
+MDR %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-mdr.png", width = 4, height = 4)
+MGE %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-mge.png", width = 10, height = 8)
+MLSB %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-mlsb.png", width = 4, height = 4)
+Other %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-other.png", width = 4, height = 4)
+Phenicol %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-phenicol.png", width = 4, height = 3)
+Quinolone %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-quinolone.png", width = 4, height = 4)
+Sulfonamide %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-sulfonamide.png", width = 4, height = 4)
+Tetracycline %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-tetracycline.png", width = 8, height = 6)
+Trimethoprim %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-trimethoprim.png", width = 4, height = 4)
+Vancomycin %>%
+  group_by(Gene) %>% 
+  ggplot(aes(x = Treatment_Stage, y = mean, colour = Gene, shape = Treatment_Stage, size = 1.5)) +
+  geom_jitter(width = 0.3) +
+  labs(x = "Treatment Stage", y = "Normalised Gene Expression") +
+  theme_bw(base_size = 10) +
+  guides(shape = "none", size = "none") +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif",
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(colour = NA))
+ggsave("Figure/line-biosolid-vancomycin.png", width = 4, height = 4)
 
 # Create a list of target antibiotics.
 target_antibiotics <- unique(Biosolid_Renamed$Target_Antibiotic)
@@ -452,12 +806,12 @@ for (target_antibiotic in target_antibiotics) {
   ggsave(paste0("Figure/heatmap-", target_antibiotic, ".png"), width = 5, height = 7)
 }
 
-# heatmap
-Aminoglycoside %>% group_by(Target_Antibiotic) %>% 
+# seperate heatmaps?
+Aminoglycoside %>% group_by(Target_Antibiotic) %>%
   ggplot() +
   geom_tile(aes(y = Gene, 
-              x = Treatment_Stage, 
-              fill = mean)) +
+                x = Treatment_Stage, 
+                fill = mean)) +
   scale_y_discrete(limits = rev) +
   scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 4e+09) +
   labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
@@ -484,7 +838,7 @@ Beta_Lactam %>% group_by(Target_Antibiotic) %>%
                 x = Treatment_Stage, 
                 fill = mean)) +
   scale_y_discrete(limits = rev) +
-  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 4e+09) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 2e+12) +
   labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
   theme_bw(base_size = 10) +
   theme(panel.grid.major = element_line(colour = "gray80"),
@@ -501,25 +855,280 @@ Beta_Lactam %>% group_by(Target_Antibiotic) %>%
         plot.background = element_rect(colour = NA,
                                        linetype = "solid"), 
         legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
-ggsave("Figure/heatmap-biosolid-aminoglycoside.png", width = 4, height = 6)
+ggsave("Figure/heatmap-biosolid-beta-lactam.png", width = 4, height = 3)
 
+Integrons %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 1.5e+07) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-integron.png", width = 4, height = 2.5)
 
+MGE %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 2.5e+09) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-mge.png", width = 4, height = 6)
 
+MDR %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 5e+12) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-mdr.png", width = 4, height = 4)
 
-#split table based on target antibiotic??
-Split2 <- split(Biosolid_Renamed, Biosolid_Renamed$Target_Antibiotic)
-Aminoglycoside <- Split2$Aminoglycoside
-Beta_Lactam <- Split2$`Beta Lactam`
-Integrons <- Split2$Integrons
-MDR <- Split2$MDR
-MGE <- Split2$MGE
-MLSB <- Split2$MLSB
-Other <- Split2$Other
-Phenicol <- Split2$Phenicol
-Quinolone <- Split2$Quinolone
-Sulfonamide <- Split2$Sulfonamide
-Tetracycline <- Split2$Tetracycline
-Trimethoprim <- Split2$Trimethoprim
+MLSB %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 6e+08) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-mlsb.png", width = 4, height = 5)
 
-# seperate heatmaps?
+Other %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 1000000) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-other.png", width = 4, height = 3)
+
+Phenicol %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 4e+05) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-phenicol.png", width = 4, height = 2)
+
+Quinolone %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 1e+10) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-quinolone.png", width = 4, height = 2.5)
+
+Sulfonamide %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 1e+11) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-sulfonamide.png", width = 4, height = 2.5)
+
+Tetracycline %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 7e+09) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-tetracycline.png", width = 4, height = 5)
+
+Trimethoprim %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 7500000) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-trimethoprim.png", width = 4, height = 1)
+
+Vancomycin %>% group_by(Target_Antibiotic) %>% 
+  ggplot() +
+  geom_tile(aes(y = Gene, 
+                x = Treatment_Stage, 
+                fill = mean)) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_gradient2(low = "turquoise3", high = "orange", mid = "yellow", midpoint = 2e+08) +
+  labs(x = "Sample", y = "Gene Name", colour = "Prevalence") +
+  theme_bw(base_size = 10) +
+  theme(panel.grid.major = element_line(colour = "gray80"),
+        panel.grid.minor = element_line(colour = "gray80"),
+        axis.text.x = element_text(angle = 90),
+        legend.text = element_text(family = "serif", 
+                                   size = 10), 
+        axis.text = element_text(family = "serif", 
+                                 size = 10),
+        axis.title = element_text(family = "serif",
+                                  size = 10, face = "bold", colour = "gray20"),
+        legend.title = element_text(size = 10,
+                                    family = "serif"),
+        plot.background = element_rect(colour = NA,
+                                       linetype = "solid"), 
+        legend.key = element_rect(fill = NA)) + labs(fill = "Intensity")
+ggsave("Figure/heatmap-biosolid-vancomycin.png", width = 4, height = 2)
 
