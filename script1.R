@@ -413,18 +413,17 @@ Annotated_Full_Summary2 <- Biosolids_Target %>%
             se = std/sqrt(n))
 
 Annotated_Full_Summary2 <- mutate(Annotated_Full_Summary2, Treatment_Stage = case_when(
-  str_detect(Treatment_Stage, "E") ~ "Fresh Biosolid",
-  str_detect(Treatment_Stage, "F") ~ "Aged Biosolid"))
+  str_detect(Treatment_Stage, "E") ~ "newdry",
+  str_detect(Treatment_Stage, "F") ~ "olddry"))
 
 # ------------GRAPHS------------------
 ggplot(data = Annotated_Full_Summary2,
-       mapping = aes(x = Treatment_Stage, y = mean,
+       mapping = aes(x = Treatment_Stage, y = log(mean),
                      group = Target_Antibiotic, color = as.factor(Target_Antibiotic))) +
-  geom_point(size = 1.5, aes(color = Target_Antibiotic)) +
+  geom_point(size = 2, aes(color = Target_Antibiotic)) +
   geom_line(aes(color =  Target_Antibiotic)) +
-  scale_x_discrete(limits = rev) +
   labs(x = "Treatment Stage",
-       y = "Mean Gene Expression", colour = "Class") +
+       y = "Log Gene Expression", colour = "Class") +
   theme_bw(base_size = 10) +
   theme(panel.grid.major = element_line(colour = "gray80"),
         panel.grid.minor = element_line(colour = "gray80"),
